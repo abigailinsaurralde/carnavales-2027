@@ -1,0 +1,19 @@
+{
+  "name": "carnavales-2027",
+  "private": true,
+  "version": "0.1.0",
+  "description": "VOTACIONES2027 — Sistema de Votación Digital para Comparsas de Carnaval Goya 2027",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "typecheck": "npm run --workspaces --if-present typecheck",
+    "test": "npm run --workspaces --if-present test",
+    "lint": "npm run --workspaces --if-present lint"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ]
+}
