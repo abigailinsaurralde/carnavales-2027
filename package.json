@@ -9,11 +9,14 @@
   },
   "scripts": {
     "typecheck": "npm run --workspaces --if-present typecheck",
-    "test": "npm run --workspaces --if-present test",
-    "lint": "npm run --workspaces --if-present lint"
+    "test": "npm run --workspaces --if-present test"
   },
   "workspaces": [
     "apps/*",
     "packages/*"
-  ]
+  ],
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "typescript": "^5.9.3"
+  }
 }
