@@ -256,15 +256,7 @@ ESPERAR DECISIÓN
 
 `docs/product/PENDIENTES.md` es la fuente autoritativa para los `PEND-*`.
 
-El agente Backend:
-
-* no puede cerrar un `PEND-*`;
-* no puede reinterpretarlo;
-* no puede convertirlo en una decisión;
-* no puede modificarlo para habilitar una implementación;
-* no puede implementar como definitivo un comportamiento que dependa directamente de un pendiente abierto.
-
-Si una funcionalidad puede implementarse sin resolver el pendiente, solamente podrá implementarse la parte independiente de dicha decisión.
+El agente Backend aplica íntegramente el tratamiento de `PEND-*` definido en el `AGENTS.md` global (no cerrar, no reinterpretar, no convertir en decisión, no modificar para habilitar implementación, implementar solo la parte independiente de la decisión pendiente).
 
 ---
 
@@ -310,23 +302,15 @@ Cuando un cambio requiera modificar otro contexto:
 3. coordinar el cambio conforme a `docs/architecture/AGENT-ARCHITECTURE.md`;
 4. no modificar silenciosamente componentes externos.
 
-La visibilidad sobre otros componentes **no implica autorización para modificarlos**.
-
-```text id="b0p8wx"
-VISIBILIDAD
-    ≠
-AUTORIZACIÓN DE MODIFICACIÓN
-    ≠
-AUTORIDAD DE DECISIÓN
-```
+La visibilidad sobre otros componentes **no implica autorización para modificarlos** (ver `AGENTS.md` global, "Gobernanza de agentes").
 
 ---
 
 ## Tests
 
-Toda modificación funcional debe contar con las validaciones correspondientes.
+Toda modificación funcional debe contar con las validaciones correspondientes (ver `AGENTS.md` global para la regla de no utilizar tests para inventar reglas de negocio).
 
-Cuando corresponda, considerar:
+Cuando corresponda, considerar en el contexto Backend:
 
 * tests unitarios;
 * integración API;
@@ -356,16 +340,10 @@ REPORTAR
 
 ## Prohibiciones específicas
 
-El agente Backend no debe:
+Las prohibiciones globales definidas en `AGENTS.md` (no inventar reglas de negocio, no reinterpretar el Reglamento, no inventar criterios de cálculo, desempates, estados o transiciones de dominio, no modificar `REGLAS-MVP-2027.md` ni `PENDIENTES.md` para justificar código, no decidir el alcance de penalizaciones) se aplican íntegramente al agente Backend.
 
-* inventar reglas de negocio;
-* reinterpretar el Reglamento;
-* modificar `REGLAS-MVP-2027.md` para justificar código;
-* modificar `PENDIENTES.md` para habilitar una funcionalidad;
-* inventar criterios de cálculo;
-* inventar desempates;
-* inventar estados o transiciones de dominio;
-* decidir unilateralmente el alcance de penalizaciones;
+Además, el agente Backend no debe:
+
 * crear endpoints únicamente por anticipación especulativa;
 * crear tablas o persistencia directamente desde Backend;
 * duplicar lógica existente en `scoring-engine`;
@@ -396,28 +374,16 @@ Estas restricciones son **específicas del HITO actual** y no constituyen una pr
 
 ## Protocolo de trabajo
 
-Para cualquier HITO futuro que involucre Backend:
+Para cualquier HITO futuro que involucre Backend, se aplica el ciclo `INSPECCIONAR → DETERMINAR ALCANCE → VERIFICAR REGLAS Y PENDIENTES → IMPLEMENTAR → VALIDAR → REVISAR DIFF → REPORTAR` definido en el `AGENTS.md` global ("Protocolo de trabajo").
+
+Además, para el contexto Backend, el agente debe incorporar en la etapa de análisis:
 
 ```text id="2x9m5k"
-1. INSPECCIONAR
+REVISAR CONTRATOS COMPARTIDOS
        ↓
-2. DETERMINAR ALCANCE
+REVISAR COMPONENTES DE DOMINIO
        ↓
-3. VERIFICAR REGLAS Y PENDIENTES
-       ↓
-4. REVISAR CONTRATOS COMPARTIDOS
-       ↓
-5. REVISAR COMPONENTES DE DOMINIO
-       ↓
-6. IDENTIFICAR IMPACTOS TRANSVERSALES
-       ↓
-7. IMPLEMENTAR SOLO LO AUTORIZADO
-       ↓
-8. VALIDAR
-       ↓
-9. REVISAR DIFF
-       ↓
-10. REPORTAR
+IDENTIFICAR IMPACTOS TRANSVERSALES
 ```
 
 Si aparece una contradicción, una decisión funcional no definida o una modificación fuera del alcance:
@@ -432,23 +398,12 @@ No continuar con la parte afectada.
 
 ## Reporte
 
-El agente Backend debe informar como mínimo:
+El agente Backend aplica el formato de reporte obligatorio definido en el `AGENTS.md` global ("Reporte obligatorio") y debe informar además los aspectos específicos de su contexto:
 
-* objetivo del HITO;
-* archivos inspeccionados;
-* archivos modificados;
 * endpoints o servicios afectados;
 * contratos compartidos utilizados o afectados;
 * componentes de dominio utilizados o afectados;
 * cambios de persistencia requeridos;
-* validaciones ejecutadas;
-* tests ejecutados;
-* impacto sobre otros contextos;
-* riesgos;
-* `PEND-*` relevantes;
-* archivos deliberadamente no modificados;
-* estado de Git;
-* commit, si existiera;
-* push, si existiera.
+* impacto sobre otros contextos.
 
 No afirmar que una funcionalidad fue validada si la validación correspondiente no fue ejecutada.

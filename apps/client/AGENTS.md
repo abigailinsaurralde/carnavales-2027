@@ -130,27 +130,7 @@ El cliente **no debe inventar estados de voto ni transiciones de estado** que no
 
 `docs/product/PENDIENTES.md` es la fuente autoritativa para los `PEND-*`.
 
-El agente Frontend:
-
-* no puede cerrar un `PEND-*`;
-* no puede reinterpretarlo;
-* no puede convertirlo en una decisión funcional;
-* no puede inventar una UX que implique resolver una decisión pendiente;
-* no puede implementar como definitivo un comportamiento cuya definición dependa directamente de un `PEND-*` abierto.
-
-Si una interfaz puede prepararse sin resolver el pendiente, solamente podrá implementarse la parte que no dependa de esa decisión.
-
-Si la implementación de una pantalla, flujo, estado o interacción depende directamente de una decisión pendiente:
-
-```text id="n0gq0e"
-PENDIENTE BLOQUEANTE
-        ↓
-STOP
-        ↓
-REPORTAR
-        ↓
-ESPERAR DECISIÓN
-```
+El agente Frontend aplica íntegramente el tratamiento de `PEND-*` definido en el `AGENTS.md` global (no cerrar, no reinterpretar, no convertir en decisión funcional, no inventar una UX que implique resolver una decisión pendiente, implementar solo la parte independiente de la decisión pendiente).
 
 ---
 
@@ -201,15 +181,7 @@ Cuando un cambio requiera modificar otro contexto:
 3. coordinarlo conforme a `docs/architecture/AGENT-ARCHITECTURE.md`;
 4. no modificar silenciosamente componentes externos al alcance.
 
-La visibilidad sobre otros componentes **no implica autorización para modificarlos**.
-
-```text id="w2e3pg"
-VISIBILIDAD
-    ≠
-AUTORIZACIÓN DE MODIFICACIÓN
-    ≠
-AUTORIDAD DE DECISIÓN
-```
+La visibilidad sobre otros componentes **no implica autorización para modificarlos** (ver `AGENTS.md` global, "Gobernanza de agentes").
 
 ---
 
@@ -245,7 +217,7 @@ El Frontend debe mantener cobertura sobre comportamientos críticos, especialmen
 * bloqueo de edición de operaciones confirmadas;
 * manejo de respuestas inválidas o inesperadas de la API.
 
-Los tests no deben utilizarse para inventar reglas de negocio.
+Los tests no deben utilizarse para inventar reglas de negocio (ver `AGENTS.md` global, "Límites de autonomía").
 
 Si un test requiere decidir un comportamiento que no está definido:
 
@@ -261,20 +233,14 @@ REPORTAR
 
 ## Prohibiciones específicas
 
-El agente Frontend no debe:
+Las prohibiciones globales definidas en `AGENTS.md` (no inventar reglas de negocio, no reinterpretar el Reglamento, no inventar criterios de cálculo, desempates, estados o transiciones de dominio, no modificar `REGLAS-MVP-2027.md` ni `PENDIENTES.md` para justificar código, no decidir el alcance de penalizaciones) se aplican íntegramente al agente Frontend.
 
-* inventar reglas de negocio;
-* reinterpretar el Reglamento;
-* modificar `REGLAS-MVP-2027.md` para justificar una implementación;
-* modificar `PENDIENTES.md` para habilitar una funcionalidad;
-* inventar estados o transiciones de dominio;
-* inventar criterios de cálculo;
-* inventar desempates;
-* decidir el alcance de penalizaciones;
+Además, el agente Frontend no debe:
+
 * asumir comportamientos excepcionales no definidos;
 * modificar Backend, Database u otros contextos sin autorización y coordinación;
 * utilizar la UI para ocultar una inconsistencia del dominio;
-* considerar que una validación exclusiva del cliente constituye garantía de seguridad o integridad del sistema.
+* considerar que una validación exclusiva del cliente constituya garantía de seguridad o integridad del sistema.
 
 ---
 
@@ -298,26 +264,14 @@ Estas restricciones son **específicas del HITO actual** y no constituyen una pr
 
 ## Protocolo de trabajo
 
-Para cualquier HITO futuro que involucre Frontend:
+Para cualquier HITO futuro que involucre Frontend, se aplica el ciclo `INSPECCIONAR → DETERMINAR ALCANCE → VERIFICAR REGLAS Y PENDIENTES → IMPLEMENTAR → VALIDAR → REVISAR DIFF → REPORTAR` definido en el `AGENTS.md` global ("Protocolo de trabajo").
+
+Además, para el contexto Frontend, el agente debe incorporar en la etapa de análisis:
 
 ```text id="6n6q8m"
-1. INSPECCIONAR
+REVISAR CONTRATOS COMPARTIDOS
        ↓
-2. DETERMINAR ALCANCE
-       ↓
-3. VERIFICAR REGLAS Y PENDIENTES
-       ↓
-4. REVISAR CONTRATOS COMPARTIDOS
-       ↓
-5. IDENTIFICAR IMPACTOS TRANSVERSALES
-       ↓
-6. IMPLEMENTAR SOLO LO AUTORIZADO
-       ↓
-7. VALIDAR
-       ↓
-8. REVISAR DIFF
-       ↓
-9. REPORTAR
+IDENTIFICAR IMPACTOS TRANSVERSALES
 ```
 
 Si durante el trabajo aparece una decisión funcional no definida, una contradicción o un cambio fuera del alcance:
@@ -332,21 +286,10 @@ No continuar con la parte afectada.
 
 ## Reporte
 
-El agente Frontend debe informar como mínimo:
+El agente Frontend aplica el formato de reporte obligatorio definido en el `AGENTS.md` global ("Reporte obligatorio") y debe informar además los aspectos específicos de su contexto:
 
-* objetivo del HITO;
-* archivos inspeccionados;
-* archivos modificados;
 * componentes creados o modificados;
 * contratos compartidos utilizados o afectados;
-* validaciones ejecutadas;
-* tests ejecutados;
-* impacto detectado sobre otros componentes;
-* riesgos;
-* `PEND-*` relevantes;
-* archivos deliberadamente no modificados;
-* estado de Git;
-* commit, si existiera;
-* push, si existiera.
+* impacto detectado sobre otros componentes.
 
 No afirmar que una funcionalidad fue validada si la validación correspondiente no fue ejecutada.

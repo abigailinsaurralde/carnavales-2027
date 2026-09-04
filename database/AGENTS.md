@@ -68,26 +68,7 @@ La implementación de persistencia no debe alterar el significado de las reglas 
 
 `docs/product/PENDIENTES.md` es la fuente autoritativa para los `PEND-*`.
 
-El agente Database:
-
-* no puede cerrar un `PEND-*`;
-* no puede reinterpretarlo;
-* no puede convertirlo en una decisión;
-* no puede implementar una decisión definitiva que dependa de un `PEND-*` abierto.
-
-Si un cambio de esquema depende directamente de una decisión pendiente:
-
-```text
-PENDIENTE BLOQUEANTE
-        ↓
-STOP
-        ↓
-REPORTAR IMPACTO
-        ↓
-ESPERAR DECISIÓN
-```
-
-Si el esquema puede prepararse sin tomar la decisión pendiente, solamente podrá implementarse la parte que no dependa de ella y deberá quedar claramente documentado el límite.
+El agente Database aplica íntegramente el tratamiento de `PEND-*` definido en el `AGENTS.md` global (no cerrar, no reinterpretar, no convertir en decisión, no implementar decisión definitiva dependiente de un pendiente abierto). Si un cambio de esquema depende directamente de una decisión pendiente, se aplica el flujo `PENDIENTE BLOQUEANTE → STOP → REPORTAR IMPACTO → ESPERAR DECISIÓN`. Si el esquema puede prepararse sin tomar la decisión pendiente, solamente podrá implementarse la parte que no dependa de ella y deberá quedar claramente documentado el límite.
 
 ---
 
@@ -109,15 +90,7 @@ Cuando un cambio de persistencia tenga impacto fuera de `database/`, debe identi
 docs/architecture/AGENT-ARCHITECTURE.md
 ```
 
-La visibilidad sobre otros componentes **no implica autorización para modificarlos**.
-
-```text
-VISIBILIDAD
-    ≠
-AUTORIZACIÓN DE MODIFICACIÓN
-    ≠
-AUTORIDAD DE DECISIÓN
-```
+La visibilidad sobre otros componentes **no implica autorización para modificarlos** (ver `AGENTS.md` global, "Gobernanza de agentes").
 
 ---
 
@@ -143,12 +116,11 @@ No introducir tablas, columnas, índices, relaciones o estructuras que no tengan
 
 ## Prohibiciones específicas
 
-El agente Database no debe:
+Las prohibiciones globales definidas en `AGENTS.md` (no inventar reglas de negocio, no reinterpretar el Reglamento, no modificar `REGLAS-MVP-2027.md` ni `PENDIENTES.md` para justificar código, no cerrar decisiones pendientes) se aplican íntegramente al agente Database.
+
+Además, el agente Database no debe:
 
 * inventar reglas de negocio mediante el esquema;
-* modificar `REGLAS-MVP-2027.md` para justificar un cambio de base de datos;
-* modificar `PENDIENTES.md` para habilitar una implementación;
-* cerrar decisiones pendientes;
 * crear entidades funcionales únicamente por anticipación;
 * realizar cambios destructivos sin autorización;
 * modificar áreas fuera de su alcance sin coordinación;
@@ -175,24 +147,14 @@ Estas restricciones son **específicas del HITO actual** y no constituyen una pr
 
 ## Protocolo de trabajo
 
-Para cualquier HITO futuro que involucre Database:
+Para cualquier HITO futuro que involucre Database, se aplica el ciclo `INSPECCIONAR → DETERMINAR ALCANCE → VERIFICAR REGLAS Y PENDIENTES → IMPLEMENTAR → VALIDAR → REVISAR DIFF → REPORTAR` definido en el `AGENTS.md` global ("Protocolo de trabajo").
+
+Además, para el contexto Database, el agente debe incorporar en la etapa de análisis:
 
 ```text
-1. INSPECCIONAR
+IDENTIFICAR IMPACTO EN PERSISTENCIA
        ↓
-2. DETERMINAR ALCANCE
-       ↓
-3. VERIFICAR REGLAS Y PENDIENTES
-       ↓
-4. IDENTIFICAR IMPACTO EN PERSISTENCIA
-       ↓
-5. IMPLEMENTAR SOLO LO AUTORIZADO
-       ↓
-6. VALIDAR MIGRACIONES Y DATOS
-       ↓
-7. REVISAR DIFF
-       ↓
-8. REPORTAR
+VALIDAR MIGRACIONES Y DATOS
 ```
 
 Si durante el trabajo aparece una decisión funcional no definida, una contradicción o un cambio fuera del alcance:
@@ -207,20 +169,10 @@ No continuar con la parte afectada.
 
 ## Reporte
 
-El agente Database debe informar como mínimo:
+El agente Database aplica el formato de reporte obligatorio definido en el `AGENTS.md` global ("Reporte obligatorio") y debe informar además los aspectos específicos de su contexto:
 
-* objetivo del HITO;
-* archivos inspeccionados;
-* archivos modificados;
 * migraciones creadas o modificadas;
 * cambios de esquema realizados;
-* validaciones ejecutadas;
-* impacto detectado sobre otros componentes;
-* riesgos;
-* `PEND-*` relevantes;
-* archivos deliberadamente no modificados;
-* estado de Git;
-* commit, si existiera;
-* push, si existiera.
+* impacto detectado sobre otros componentes.
 
 No afirmar que una migración o cambio de esquema fue validado si la validación no fue ejecutada.

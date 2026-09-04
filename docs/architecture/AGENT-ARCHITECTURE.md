@@ -243,15 +243,7 @@ aislamiento de roles, manipulación, replay, escenarios de abuso y controles de
 integridad. Security no reemplaza a Testing. Testing no define políticas de
 seguridad por sí mismo.
 
-En todos los casos vale la distinción:
-
-```text
-VISIBILIDAD
-≠
-AUTORIZACIÓN DE MODIFICACIÓN
-≠
-AUTORIDAD DE DECISIÓN
-```
+En todos los casos vale la distinción definida en `AGENTS.md` global ("Gobernanza de agentes"): la visibilidad sobre un área no implica autorización para modificarla ni autoridad de decisión.
 
 ### STOP de seguridad
 
@@ -577,13 +569,7 @@ Todos los agentes deben trabajar con:
 - trazabilidad;
 - ausencia de cambios colaterales.
 
-No se permite usar cambios globales como `git add .` para resolver tareas de
-staging.
-
-No realizar `git reset --hard`, `git clean`, `git push`, `git merge` ni
-`git rebase` sin autorización explícita.
-
-No realizar commits sin autorización explícita.
+Las restricciones de Git (prohibiciones de push, merge, rebase, reset, clean, commits sin autorización, y uso de `git add .`) se definen en `AGENTS.md` global ("Git").
 
 ---
 
@@ -617,22 +603,7 @@ cambiar reglas de negocio.
 
 ## 22. Reporte de los agentes
 
-Reporte mínimo:
-
-```text
-1. Objetivo
-2. Alcance
-3. Archivos inspeccionados
-4. Archivos modificados
-5. Cambios realizados
-6. Dependencias afectadas
-7. Validaciones ejecutadas
-8. Resultado
-9. Riesgos
-10. PEND-* relacionados
-11. Decisiones que requieren intervención humana
-12. Estado Git
-```
+Reporte mínimo: se aplica el formato definido en `AGENTS.md` global ("Reporte obligatorio").
 
 El Orchestrator consolida estos reportes.
 
