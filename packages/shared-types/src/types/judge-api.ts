@@ -103,6 +103,7 @@ export interface SyncVoteResult {
 export interface SyncPlanillaResult {
   planillaId: string;
   planillaAction: "INSERTED" | "ALREADY_EXISTS" | "CONFLICT";
+  reason?: string;
   votes: SyncVoteResult[];
 }
 

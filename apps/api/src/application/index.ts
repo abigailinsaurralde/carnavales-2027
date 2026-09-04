@@ -22,6 +22,7 @@ import {
   ListMyPlanillas,
   Login,
   Logout,
+  SyncPlanillas,
   UpsertVote,
 } from "./use-cases/index.js";
 
@@ -38,6 +39,7 @@ export interface Application {
   getPlanilla: GetPlanilla;
   upsertVote: UpsertVote;
   confirmPlanilla: ConfirmPlanilla;
+  syncPlanillas: SyncPlanillas;
 }
 
 export interface Repositories {
@@ -103,6 +105,14 @@ export function createApplication(
       repos.assignments,
       repos.catalogue,
       repos.uow,
+    ),
+    syncPlanillas: new SyncPlanillas(
+      repos.editions,
+      repos.configurations,
+      repos.assignments,
+      repos.catalogue,
+      repos.uow,
+      validator,
     ),
   };
 }

@@ -10,3 +10,4 @@ export * from "./create-planilla.js";
 export * from "./get-planilla.js";
 export * from "./upsert-vote.js";
 export * from "./confirm-planilla.js";
+export * from "./sync-planillas.js";

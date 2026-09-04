@@ -1,5 +1,9 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { AuthenticatedUser, VoteUpsertPayload } from "@votaciones2027/shared-types";
+import type {
+  AuthenticatedUser,
+  SyncPlanillaPayload,
+  VoteUpsertPayload,
+} from "@votaciones2027/shared-types";
 import { ForbiddenError, UnauthorizedError, ValidationError } from "../errors/app-error.js";
 import { writeJson } from "../errors/handler.js";
 import { readJsonBody } from "../http/body.js";
@@ -118,6 +122,35 @@ export async function handleConfirmPlanilla(
   const result = await ctx.app.confirmPlanilla.execute({
     judgeId: user.id,
     planillaId,
+  });
+  writeJson(res, 200, result);
+}
+
+/**
+ * Sincronización offline-first: recibe planillas capturadas en el cliente y
+ * las aplica de forma idempotente. Los conflictos de una planilla concreta se
+ * devuelven en el resultado (200), no como error HTTP, para que el cliente
+ * pueda reconciliar su cola operación por operación.
+ */
+export async function handleSyncPlanillas(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: RouteContext,
+): Promise<void> {
+  const user = await requireJudgeSession(ctx, req);
+  const body = await readJsonBody(req);
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    throw new ValidationError("Invalid request body: expected an object");
+  }
+
+  const rawPlanillas = (body as { planillas?: unknown })["planillas"];
+  if (!Array.isArray(rawPlanillas)) {
+    throw new ValidationError("Invalid request body: expected 'planillas' array");
+  }
+
+  const result = await ctx.app.syncPlanillas.execute({
+    judgeId: user.id,
+    payload: { planillas: rawPlanillas as SyncPlanillaPayload[] },
   });
   writeJson(res, 200, result);
 }

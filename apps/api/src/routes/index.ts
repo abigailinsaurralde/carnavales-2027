@@ -12,6 +12,7 @@ import {
   handleGetJudgeContext,
   handleGetPlanilla,
   handleListMyPlanillas,
+  handleSyncPlanillas,
   handleUpsertVote,
 } from "./judge.js";
 import { handleGetNight } from "./night.js";
@@ -35,6 +36,11 @@ export function createRoutes(): readonly Route[] {
     { method: "GET", path: "/judge/context", handler: handleGetJudgeContext },
     { method: "GET", path: "/judge/planillas", handler: handleListMyPlanillas },
     { method: "POST", path: "/judge/planillas", handler: handleCreatePlanilla },
+    {
+      method: "POST",
+      path: "/judge/planillas/sync",
+      handler: handleSyncPlanillas,
+    },
     {
       method: "GET",
       path: "/judge/planillas/:planillaId",
