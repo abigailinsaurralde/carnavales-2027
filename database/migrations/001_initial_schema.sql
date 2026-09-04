@@ -126,11 +126,16 @@ CREATE TABLE judge_assignment (
     -- Conserva la asignación original y permite crear una nueva asignación
     -- efectiva en caso de reemplazo (DOMAIN-MODEL §6.5).
     CONSTRAINT uq_judge_assignment_per_judge_night_specialty
-        UNIQUE (judge_id, night_id, specialty_id),
-    -- Exactamente un juez efectivo por noche + especialidad (REGLAS 2027 §3.1).
-    CONSTRAINT uq_judge_assignment_effective_per_night_specialty
-        UNIQUE (night_id, specialty_id) WHERE is_effective = TRUE
+        UNIQUE (judge_id, night_id, specialty_id)
 );
+
+-- Exactamente un juez efectivo por noche + especialidad (REGLAS 2027 §3.1).
+-- NOTA: PostgreSQL no admite un predicado WHERE dentro de una CONSTRAINT
+-- UNIQUE; la garantía se expresa con un índice único parcial equivalente
+-- (misma unicidad entre filas con is_effective = TRUE).
+CREATE UNIQUE INDEX uq_judge_assignment_effective_per_night_specialty
+    ON judge_assignment (night_id, specialty_id)
+    WHERE is_effective = TRUE;
 
 CREATE TABLE judge_replacement (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),

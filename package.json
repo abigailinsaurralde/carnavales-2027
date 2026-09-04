@@ -9,7 +9,8 @@
   },
   "scripts": {
     "typecheck": "npm run --workspaces --if-present typecheck",
-    "test": "npm run --workspaces --if-present test"
+    "test": "npm run --workspaces --if-present test",
+    "test:e2e": "vitest run tests/e2e"
   },
   "workspaces": [
     "apps/*",
