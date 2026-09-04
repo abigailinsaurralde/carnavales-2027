@@ -12,8 +12,10 @@ import {
 import { PostgresConfigurationRepository } from "./infrastructure/repositories/postgres-configuration-repository.js";
 import { PostgresEditionRepository } from "./infrastructure/repositories/postgres-edition-repository.js";
 import { PostgresNightRepository } from "./infrastructure/repositories/postgres-night-repository.js";
+import { PostgresSessionRepository } from "./infrastructure/repositories/postgres-session-repository.js";
+import { PostgresUserRepository } from "./infrastructure/repositories/postgres-user-repository.js";
 import { createRoutes, type RouteContext } from "./routes/index.js";
-import { matchRoute, type Route } from "./routes/router.js";
+import { findPathCandidate, matchRoute, type Route } from "./routes/router.js";
 
 const MAX_BODY_BYTES = 1024 * 1024; // 1 MB
 
@@ -23,11 +25,16 @@ export interface AppServer {
 }
 
 export function createApp(config: AppConfig, db: DbPool = createPool(config.databaseUrl)): AppServer {
-  const app = createApplication({
-    editions: new PostgresEditionRepository(db),
-    nights: new PostgresNightRepository(db),
-    configurations: new PostgresConfigurationRepository(db),
-  });
+  const app = createApplication(
+    {
+      editions: new PostgresEditionRepository(db),
+      nights: new PostgresNightRepository(db),
+      configurations: new PostgresConfigurationRepository(db),
+      users: new PostgresUserRepository(db),
+      sessions: new PostgresSessionRepository(db),
+    },
+    { sessionTtlHours: config.sessionTtlHours },
+  );
 
   const routes = createRoutes();
   const ctx: RouteContext = { app, nodeEnv: config.nodeEnv, corsOrigins: config.corsOrigins };
@@ -76,23 +83,25 @@ async function handleRequest(
       return;
     }
 
-    if (method !== undefined && !["GET", "HEAD"].includes(method)) {
+    const match = matchRoute(routes, req.method, req.url);
+
+    if (match) {
+      await match.route.handler(req, res, ctx, match.params);
+      return;
+    }
+
+    const candidate = findPathCandidate(routes, req.url);
+    if (candidate !== undefined) {
+      res.setHeader("Allow", candidate.method);
       writeJson(res, 405, {
         error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" },
       });
       return;
     }
 
-    const match = matchRoute(routes, req.method, req.url);
-
-    if (!match) {
-      writeJson(res, 404, {
-        error: { code: "NOT_FOUND", message: "Route not found" },
-      });
-      return;
-    }
-
-    await match.route.handler(req, res, ctx, match.params);
+    writeJson(res, 404, {
+      error: { code: "NOT_FOUND", message: "Route not found" },
+    });
   } catch (err) {
     handleError(res, err, nodeEnv);
   }

@@ -41,6 +41,28 @@ export function matchRoute(
   return undefined;
 }
 
+/**
+ * Busca una ruta que coincida por PATH aunque el método no coincida.
+ * Permite distinguir 404 (ninguna ruta) de 405 (ruta existente, método no
+ * admitido), devolviendo el candidato para anunciar el header `Allow`.
+ */
+export function findPathCandidate(
+  routes: readonly Route[],
+  url: string | undefined,
+): Route | undefined {
+  if (!url) return undefined;
+
+  const pathname = url.split("?")[0] ?? "/";
+
+  for (const route of routes) {
+    if (matchPath(route.path, pathname) !== undefined) {
+      return route;
+    }
+  }
+
+  return undefined;
+}
+
 function matchPath(
   pattern: string,
   pathname: string,

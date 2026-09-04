@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-export const ALLOWED_METHODS = ["GET", "HEAD", "OPTIONS"] as const;
+export const ALLOWED_METHODS = ["GET", "HEAD", "POST", "OPTIONS"] as const;
 
 const SECURITY_HEADERS: Readonly<Record<string, string>> = {
   "X-Content-Type-Options": "nosniff",
@@ -54,7 +54,10 @@ export function sendPreflight(res: ServerResponse, origin: string | null): void 
     }
   }
   res.setHeader("Access-Control-Allow-Methods", ALLOWED_METHODS.join(", "));
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Idempotency-Key");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization, Idempotency-Key",
+  );
   res.statusCode = 204;
   res.end();
 }

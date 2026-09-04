@@ -1,4 +1,5 @@
 export { CARNAVAL_2027_RULES } from "./rules.js";
+export * from "./types/auth.js";
 export * from "./types/specialty.js";
 export * from "./types/roles.js";
 export * from "./types/carnaval.js";

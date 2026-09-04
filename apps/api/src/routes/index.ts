@@ -1,4 +1,9 @@
 import { handleGetConfigurationVersion } from "./configuration.js";
+import {
+  handleGetSessionUser,
+  handleLogin,
+  handleLogout,
+} from "./auth.js";
 import { handleGetEdition } from "./edition.js";
 import { handleHealth } from "./health.js";
 import { handleGetNight } from "./night.js";
@@ -16,5 +21,8 @@ export function createRoutes(): readonly Route[] {
       path: "/editions/:editionId/configuration",
       handler: handleGetConfigurationVersion,
     },
+    { method: "POST", path: "/auth/login", handler: handleLogin },
+    { method: "POST", path: "/auth/logout", handler: handleLogout },
+    { method: "GET", path: "/auth/me", handler: handleGetSessionUser },
   ];
 }

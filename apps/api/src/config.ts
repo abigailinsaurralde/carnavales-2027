@@ -3,7 +3,10 @@ export interface AppConfig {
   nodeEnv: "development" | "production" | "test";
   databaseUrl: string;
   corsOrigins: string[];
+  sessionTtlHours: number;
 }
+
+export const DEFAULT_SESSION_TTL_HOURS = 12;
 
 export const NODE_ENVS = ["development", "production", "test"] as const;
 export type NodeEnv = (typeof NODE_ENVS)[number];
@@ -25,6 +28,19 @@ function parsePort(raw: string | undefined, fallback: number): number {
   return port;
 }
 
+function parsePositiveInteger(
+  raw: string | undefined,
+  fallback: number,
+  name: string,
+): number {
+  if (raw === undefined || raw === "") return fallback;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`Invalid ${name}: expected a positive integer`);
+  }
+  return value;
+}
+
 export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
   const rawNodeEnv = process.env["NODE_ENV"] ?? "development";
   if (!(NODE_ENVS as readonly string[]).includes(rawNodeEnv)) {
@@ -36,6 +52,11 @@ export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
 
   const port = parsePort(process.env["PORT"], 3000);
   const databaseUrl = overrides?.databaseUrl ?? requireEnv("DATABASE_URL");
+  const sessionTtlHours = parsePositiveInteger(
+    process.env["SESSION_TTL_HOURS"],
+    overrides?.sessionTtlHours ?? DEFAULT_SESSION_TTL_HOURS,
+    "SESSION_TTL_HOURS",
+  );
   const corsOrigins = (process.env["CORS_ORIGINS"] ?? "*")
     .split(",")
     .map((s) => s.trim())
@@ -52,6 +73,7 @@ export function loadConfig(overrides?: Partial<AppConfig>): AppConfig {
     nodeEnv,
     databaseUrl,
     corsOrigins,
+    sessionTtlHours,
     ...overrides,
   };
 }

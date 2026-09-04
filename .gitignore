@@ -53,6 +53,7 @@ lerna-debug.log*
 *.sql
 !database/schema/**/*.sql
 !database/migrations/**/*.sql
+!database/seeds/**/*.sql
 
 # SQL dumps
 *.dump

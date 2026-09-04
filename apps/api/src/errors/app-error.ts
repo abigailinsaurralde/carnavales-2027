@@ -33,6 +33,24 @@ export class DatabaseError extends AppError {
   readonly internalMessage: string;
 }
 
+export class UnauthorizedError extends AppError {
+  constructor() {
+    super("Unauthorized", 401, "UNAUTHORIZED");
+    this.name = "UnauthorizedError";
+  }
+}
+
+/**
+ * Credenciales inválidas. Mensaje genérico e idéntico para "usuario inexistente"
+ * y "contraseña incorrecta", para impedir la enumeración de cuentas.
+ */
+export class InvalidCredentialsError extends AppError {
+  constructor() {
+    super("Invalid email or password", 401, "INVALID_CREDENTIALS");
+    this.name = "InvalidCredentialsError";
+  }
+}
+
 export function isInternalSensitiveError(error: unknown): error is DatabaseError {
   return error instanceof DatabaseError;
 }
