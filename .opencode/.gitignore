@@ -1,7 +1,0 @@
-# Dependencias locales de OpenCode (tooling) — no versionar
-node_modules/
-
-# No versionar el manifest de tooling local de OpenCode
-package.json
-package-lock.json
-bun.lock
