@@ -82,44 +82,46 @@ class FakeSessionRepository implements SessionRepository {
 // ---------------------------------------------------------------------------
 
 function scriptedDb(users: UserAccount[], sessions: Map<string, Session>): DbPool {
+  const query = async <T>(text: string, params?: unknown[]) => {
+    if (text.includes("FROM user_account") && text.includes("WHERE email")) {
+      const email = String((params ?? [])[0]);
+      const user = users.find((u) => u.email === email);
+      return { rows: user === undefined ? [] : [toUserRow(user)] as T[] };
+    }
+    if (text.includes("FROM user_account") && text.includes("WHERE id")) {
+      const id = String((params ?? [])[0]);
+      const user = users.find((u) => u.id === id);
+      return { rows: user === undefined ? [] : [toUserRow(user)] as T[] };
+    }
+    if (text.startsWith("INSERT INTO session")) {
+      const [userId, tokenHash, expiresAt] = params as [string, string, Date];
+      sessions.set(tokenHash, {
+        id: `session-http-${sessions.size + 1}`,
+        userId,
+        tokenHash,
+        createdAt: new Date(),
+        expiresAt,
+        revokedAt: null,
+      });
+      return { rows: [] as T[] };
+    }
+    if (text.includes("FROM session")) {
+      const tokenHash = String((params ?? [])[0]);
+      const session = sessions.get(tokenHash);
+      return { rows: session === undefined ? [] : [toSessionRow(session)] as T[] };
+    }
+    if (text.startsWith("UPDATE session")) {
+      const id = String((params ?? [])[0]);
+      for (const session of sessions.values()) {
+        if (session.id === id) session.revokedAt = new Date();
+      }
+      return { rows: [] as T[] };
+    }
+    throw new Error(`Unexpected query in auth test: ${text}`);
+  };
   return {
-    async query<T>(text: string, params?: unknown[]) {
-      if (text.includes("FROM user_account") && text.includes("WHERE email")) {
-        const email = String((params ?? [])[0]);
-        const user = users.find((u) => u.email === email);
-        return { rows: user === undefined ? [] : [toUserRow(user)] as T[] };
-      }
-      if (text.includes("FROM user_account") && text.includes("WHERE id")) {
-        const id = String((params ?? [])[0]);
-        const user = users.find((u) => u.id === id);
-        return { rows: user === undefined ? [] : [toUserRow(user)] as T[] };
-      }
-      if (text.startsWith("INSERT INTO session")) {
-        const [userId, tokenHash, expiresAt] = params as [string, string, Date];
-        sessions.set(tokenHash, {
-          id: `session-http-${sessions.size + 1}`,
-          userId,
-          tokenHash,
-          createdAt: new Date(),
-          expiresAt,
-          revokedAt: null,
-        });
-        return { rows: [] as T[] };
-      }
-      if (text.includes("FROM session")) {
-        const tokenHash = String((params ?? [])[0]);
-        const session = sessions.get(tokenHash);
-        return { rows: session === undefined ? [] : [toSessionRow(session)] as T[] };
-      }
-      if (text.startsWith("UPDATE session")) {
-        const id = String((params ?? [])[0]);
-        for (const session of sessions.values()) {
-          if (session.id === id) session.revokedAt = new Date();
-        }
-        return { rows: [] as T[] };
-      }
-      throw new Error(`Unexpected query in auth test: ${text}`);
-    },
+    query,
+    withTransaction: (fn) => fn({ query }),
     async end() {},
   };
 }

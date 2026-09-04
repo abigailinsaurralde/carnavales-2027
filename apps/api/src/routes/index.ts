@@ -6,6 +6,14 @@ import {
 } from "./auth.js";
 import { handleGetEdition } from "./edition.js";
 import { handleHealth } from "./health.js";
+import {
+  handleConfirmPlanilla,
+  handleCreatePlanilla,
+  handleGetJudgeContext,
+  handleGetPlanilla,
+  handleListMyPlanillas,
+  handleUpsertVote,
+} from "./judge.js";
 import { handleGetNight } from "./night.js";
 import type { Route, RouteContext } from "./router.js";
 
@@ -24,5 +32,23 @@ export function createRoutes(): readonly Route[] {
     { method: "POST", path: "/auth/login", handler: handleLogin },
     { method: "POST", path: "/auth/logout", handler: handleLogout },
     { method: "GET", path: "/auth/me", handler: handleGetSessionUser },
+    { method: "GET", path: "/judge/context", handler: handleGetJudgeContext },
+    { method: "GET", path: "/judge/planillas", handler: handleListMyPlanillas },
+    { method: "POST", path: "/judge/planillas", handler: handleCreatePlanilla },
+    {
+      method: "GET",
+      path: "/judge/planillas/:planillaId",
+      handler: handleGetPlanilla,
+    },
+    {
+      method: "PUT",
+      path: "/judge/planillas/:planillaId/votes/:voteId",
+      handler: handleUpsertVote,
+    },
+    {
+      method: "POST",
+      path: "/judge/planillas/:planillaId/confirm",
+      handler: handleConfirmPlanilla,
+    },
   ];
 }

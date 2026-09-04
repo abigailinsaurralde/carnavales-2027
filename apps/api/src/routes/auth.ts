@@ -15,6 +15,8 @@ function readBearerToken(req: IncomingMessage): string | null {
   return match === null ? null : match[1]!;
 }
 
+export { readBearerToken };
+
 function validateEmail(value: unknown): string {
   if (
     typeof value !== "string" ||

@@ -17,4 +17,16 @@ export class PostgresEditionRepository implements EditionRepository {
     const row = result.rows[0];
     return row === undefined ? null : mapEdition(row);
   }
+
+  async findByCode(code: string): Promise<CarnavalEdition | null> {
+    const result = await this.db.query<EditionRow>(
+      `SELECT id, code, name, voting_nights, starts_on, ends_on
+       FROM carnaval_edition
+       WHERE code = $1`,
+      [code],
+    );
+
+    const row = result.rows[0];
+    return row === undefined ? null : mapEdition(row);
+  }
 }

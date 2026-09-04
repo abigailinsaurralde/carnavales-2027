@@ -14,20 +14,22 @@ import type { DbPool } from "../src/db/pool.js";
 const VALID_EDITION = "11111111-1111-4111-8111-111111111111";
 
 function fakeDb(rows: unknown[], captured: { text: string; params: unknown[] }[]): DbPool {
+  const query = async <T>(text: string, params?: unknown[]) => {
+    captured.push({ text, params: params ?? [] });
+    return { rows: rows as T[] } as never;
+  };
   return {
-    async query<T>(text: string, params?: unknown[]) {
-      captured.push({ text, params: params ?? [] });
-      return { rows: rows as T[] };
-    },
+    query,
+    withTransaction: (fn) => fn({ query }),
     async end() {},
   };
 }
 
 function mockDb(rows: unknown[]): DbPool {
+  const query = async <T>() => ({ rows: rows as T[] }) as never;
   return {
-    async query<T>() {
-      return { rows: rows as T[] };
-    },
+    query,
+    withTransaction: (fn) => fn({ query }),
     async end() {},
   };
 }

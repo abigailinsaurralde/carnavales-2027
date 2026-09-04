@@ -40,6 +40,20 @@ export class UnauthorizedError extends AppError {
   }
 }
 
+export class ForbiddenError extends AppError {
+  constructor(message = "Forbidden") {
+    super(message, 403, "FORBIDDEN");
+    this.name = "ForbiddenError";
+  }
+}
+
+export class ConflictError extends AppError {
+  constructor(message = "Conflict", code = "CONFLICT") {
+    super(message, 409, code);
+    this.name = "ConflictError";
+  }
+}
+
 /**
  * Credenciales inválidas. Mensaje genérico e idéntico para "usuario inexistente"
  * y "contraseña incorrecta", para impedir la enumeración de cuentas.

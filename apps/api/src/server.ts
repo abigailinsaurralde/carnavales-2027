@@ -9,11 +9,17 @@ import {
   resolveCorsOrigin,
   sendPreflight,
 } from "./http/security.js";
+import { PostgresAuditRepository } from "./infrastructure/repositories/postgres-audit-repository.js";
+import { PostgresCatalogueRepository } from "./infrastructure/repositories/postgres-catalogue-repository.js";
 import { PostgresConfigurationRepository } from "./infrastructure/repositories/postgres-configuration-repository.js";
 import { PostgresEditionRepository } from "./infrastructure/repositories/postgres-edition-repository.js";
+import { PostgresJudgeAssignmentRepository } from "./infrastructure/repositories/postgres-judge-assignment-repository.js";
 import { PostgresNightRepository } from "./infrastructure/repositories/postgres-night-repository.js";
+import { PostgresPlanillaRepository } from "./infrastructure/repositories/postgres-planilla-repository.js";
 import { PostgresSessionRepository } from "./infrastructure/repositories/postgres-session-repository.js";
+import { PostgresUnitOfWork } from "./infrastructure/repositories/postgres-unit-of-work.js";
 import { PostgresUserRepository } from "./infrastructure/repositories/postgres-user-repository.js";
+import { PostgresVoteRepository } from "./infrastructure/repositories/postgres-vote-repository.js";
 import { createRoutes, type RouteContext } from "./routes/index.js";
 import { findPathCandidate, matchRoute, type Route } from "./routes/router.js";
 
@@ -32,6 +38,12 @@ export function createApp(config: AppConfig, db: DbPool = createPool(config.data
       configurations: new PostgresConfigurationRepository(db),
       users: new PostgresUserRepository(db),
       sessions: new PostgresSessionRepository(db),
+      planillas: new PostgresPlanillaRepository(db),
+      votes: new PostgresVoteRepository(db),
+      assignments: new PostgresJudgeAssignmentRepository(db),
+      catalogue: new PostgresCatalogueRepository(db),
+      audits: new PostgresAuditRepository(db),
+      uow: new PostgresUnitOfWork(db),
     },
     { sessionTtlHours: config.sessionTtlHours },
   );

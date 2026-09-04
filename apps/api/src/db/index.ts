@@ -1,1 +1,1 @@
-export { createPool, type DbPool } from "./pool.js";
+export { createPool, type DbPool, type QueryRunner } from "./pool.js";

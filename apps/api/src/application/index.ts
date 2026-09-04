@@ -1,15 +1,28 @@
+import type { AuditRepository } from "../domain/repositories/audit-repository.js";
+import type { CatalogueRepository } from "../domain/repositories/catalogue-repository.js";
 import type { ConfigurationRepository } from "../domain/repositories/configuration-repository.js";
 import type { EditionRepository } from "../domain/repositories/edition-repository.js";
+import type { JudgeAssignmentRepository } from "../domain/repositories/judge-assignment-repository.js";
 import type { NightRepository } from "../domain/repositories/night-repository.js";
+import type { PlanillaRepository } from "../domain/repositories/planilla-repository.js";
 import type { SessionRepository } from "../domain/repositories/session-repository.js";
+import type { UnitOfWork } from "../domain/repositories/unit-of-work.js";
 import type { UserRepository } from "../domain/repositories/user-repository.js";
+import type { VoteRepository } from "../domain/repositories/vote-repository.js";
+import { VoteValidator } from "./services/vote-validator.js";
 import {
+  ConfirmPlanilla,
+  CreatePlanilla,
   GetConfigurationVersion,
   GetEdition,
   GetNight,
+  GetPlanilla,
   GetSessionUser,
+  JudgeContext,
+  ListMyPlanillas,
   Login,
   Logout,
+  UpsertVote,
 } from "./use-cases/index.js";
 
 export interface Application {
@@ -19,6 +32,12 @@ export interface Application {
   login: Login;
   logout: Logout;
   getSessionUser: GetSessionUser;
+  judgeContext: JudgeContext;
+  listMyPlanillas: ListMyPlanillas;
+  createPlanilla: CreatePlanilla;
+  getPlanilla: GetPlanilla;
+  upsertVote: UpsertVote;
+  confirmPlanilla: ConfirmPlanilla;
 }
 
 export interface Repositories {
@@ -27,6 +46,12 @@ export interface Repositories {
   configurations: ConfigurationRepository;
   users: UserRepository;
   sessions: SessionRepository;
+  planillas: PlanillaRepository;
+  votes: VoteRepository;
+  assignments: JudgeAssignmentRepository;
+  catalogue: CatalogueRepository;
+  audits: AuditRepository;
+  uow: UnitOfWork;
 }
 
 export interface ApplicationOptions {
@@ -37,6 +62,12 @@ export function createApplication(
   repos: Repositories,
   options: ApplicationOptions,
 ): Application {
+  const validator = new VoteValidator(
+    repos.nights,
+    repos.assignments,
+    repos.catalogue,
+  );
+
   return {
     getEdition: new GetEdition(repos.editions),
     getNight: new GetNight(repos.nights),
@@ -44,5 +75,34 @@ export function createApplication(
     login: new Login(repos.users, repos.sessions, options.sessionTtlHours),
     logout: new Logout(repos.sessions),
     getSessionUser: new GetSessionUser(repos.users, repos.sessions),
+    judgeContext: new JudgeContext(
+      repos.editions,
+      repos.nights,
+      repos.configurations,
+      repos.assignments,
+      repos.catalogue,
+    ),
+    listMyPlanillas: new ListMyPlanillas(repos.planillas),
+    createPlanilla: new CreatePlanilla(
+      repos.planillas,
+      repos.votes,
+      repos.assignments,
+      repos.audits,
+    ),
+    getPlanilla: new GetPlanilla(repos.planillas, repos.votes),
+    upsertVote: new UpsertVote(
+      repos.editions,
+      repos.configurations,
+      repos.planillas,
+      repos.votes,
+      validator,
+    ),
+    confirmPlanilla: new ConfirmPlanilla(
+      repos.editions,
+      repos.configurations,
+      repos.assignments,
+      repos.catalogue,
+      repos.uow,
+    ),
   };
 }

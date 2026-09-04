@@ -6,11 +6,13 @@ import { PostgresConfigurationRepository } from "../src/infrastructure/repositor
 
 function fakeDb(rows: unknown[]): DbPool & { captured: { text: string; params: unknown[] }[] } {
   const captured: { text: string; params: unknown[] }[] = [];
+  const query = async <T>(text: string, params?: unknown[]) => {
+    captured.push({ text, params: params ?? [] });
+    return { rows: rows as T[] } as never;
+  };
   const db = {
-    async query<T>(text: string, params?: unknown[]): Promise<{ rows: T[] }> {
-      captured.push({ text, params: params ?? [] });
-      return { rows: rows as T[] };
-    },
+    query,
+    withTransaction: (fn: (tx: unknown) => Promise<unknown>) => fn({ query }),
     async end() {},
   };
   return Object.assign(db, { captured });

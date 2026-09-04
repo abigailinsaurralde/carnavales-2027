@@ -7,10 +7,10 @@ import type { DbPool } from "../src/db/pool.js";
 type RowsByQuery = () => unknown[];
 
 function mockDb(rows: RowsByQuery): DbPool {
+  const query = async <T>() => ({ rows: rows() as T[] }) as never;
   return {
-    async query<T>() {
-      return { rows: rows() as T[] };
-    },
+    query,
+    withTransaction: (fn) => fn({ query }),
     async end() {},
   };
 }

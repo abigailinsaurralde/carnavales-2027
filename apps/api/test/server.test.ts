@@ -4,10 +4,11 @@ import { loadConfig } from "../src/config.js";
 import type { DbPool } from "../src/db/pool.js";
 
 function mockDb(): DbPool {
+  const query = async () =>
+    ({ rows: [], rowCount: 0, command: "SELECT", oid: 0, fields: [] }) as never;
   return {
-    async query() {
-      return { rows: [], rowCount: 0, command: "SELECT", oid: 0, fields: [] };
-    },
+    query,
+    withTransaction: (fn) => fn({ query }),
     async end() {},
   };
 }
