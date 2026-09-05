@@ -66,6 +66,12 @@ export class IssueAccessToken
       throw new InvalidCredentialsError();
     }
 
+    // Igualación de timing (anti-enumeración, NO validación): el camino de
+    // ÉXITO ejecuta una verificación scrypt dummy para que su latencia sea
+    // indistinguible de los caminos de fallo; así un atacante no puede
+    // distinguir un par (email, dni) válido por el tiempo de respuesta.
+    await verifyPassword("access-token-success", DUMMY_PASSWORD_HASH);
+
     const token = generateAccessToken();
     const tokenHash = hashAccessToken(token);
     const expiresAt = new Date(Date.now() + ACCESS_TOKEN_TTL_MS);

@@ -1,5 +1,6 @@
 import type { AuthSession, LoginRequest } from "@votaciones2027/shared-types";
 import { toAuthenticatedUser } from "../../domain/entities/user.js";
+import type { AuditRepository } from "../../domain/repositories/audit-repository.js";
 import type { SessionRepository } from "../../domain/repositories/session-repository.js";
 import type { UserRepository } from "../../domain/repositories/user-repository.js";
 import { InvalidCredentialsError } from "../../errors/app-error.js";
@@ -17,6 +18,7 @@ export class Login implements UseCase<LoginRequest, AuthSession> {
   constructor(
     private readonly users: UserRepository,
     private readonly sessions: SessionRepository,
+    private readonly audits: AuditRepository,
     private readonly sessionTtlHours: number,
   ) {}
 
@@ -43,6 +45,16 @@ export class Login implements UseCase<LoginRequest, AuthSession> {
     );
 
     await this.sessions.create({ userId: user.id, tokenHash, expiresAt });
+
+    // §19 del Reglamento exige auditar el inicio de sesión. Mismo patrón que
+    // login-with-access-token.ts, distinguiendo el método utilizado.
+    await this.audits.create({
+      eventType: "LOGIN",
+      entityType: "USER",
+      entityId: user.id,
+      actorUserId: user.id,
+      payload: { method: "password" },
+    });
 
     return {
       token,

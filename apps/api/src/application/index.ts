@@ -80,7 +80,12 @@ export function createApplication(
     getEdition: new GetEdition(repos.editions),
     getNight: new GetNight(repos.nights),
     getConfigurationVersion: new GetConfigurationVersion(repos.configurations),
-    login: new Login(repos.users, repos.sessions, options.sessionTtlHours),
+    login: new Login(
+      repos.users,
+      repos.sessions,
+      repos.audits,
+      options.sessionTtlHours,
+    ),
     logout: new Logout(repos.sessions),
     getSessionUser: new GetSessionUser(repos.users, repos.sessions),
     issueAccessToken: new IssueAccessToken(

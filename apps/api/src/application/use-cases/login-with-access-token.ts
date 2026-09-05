@@ -68,8 +68,15 @@ export class LoginWithAccessToken
       throw new InvalidCredentialsError();
     }
 
-    // Consumo irreversible del token de un solo uso, ANTES de crear la sesión.
-    await this.accessTokens.markUsed(accessToken.id);
+    // Consumo atómico condicional del token de un solo uso, ANTES de crear la
+    // sesión. Fail-closed: ante una carrera concurrente, solo un canje obtiene
+    // `true`; los demás lanzan InvalidCredentialsError. Si la sesión fallara
+    // tras consumir el token, este queda consumido sin sesión (comportamiento
+    // seguro y documentado; no se introduce transacción nueva aquí).
+    const consumed = await this.accessTokens.markUsed(accessToken.id);
+    if (!consumed) {
+      throw new InvalidCredentialsError();
+    }
 
     const sessionToken = generateSessionToken();
     const sessionTokenHash = hashSessionToken(sessionToken);

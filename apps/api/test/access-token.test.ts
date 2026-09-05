@@ -85,9 +85,15 @@ class FakeAccessTokenRepository implements AccessTokenRepository {
     return this.tokens.get(tokenHash) ?? null;
   }
 
-  async markUsed(id: string): Promise<void> {
+  /**
+   * Replica la semántica condicional atómica del UPDATE real
+   * (`WHERE used_at IS NULL`): true solo la primera vez, false si ya usado.
+   */
+  async markUsed(id: string): Promise<boolean> {
     const token = [...this.tokens.values()].find((t) => t.id === id);
-    if (token !== undefined) token.usedAt = new Date();
+    if (token === undefined || token.usedAt !== null) return false;
+    token.usedAt = new Date();
+    return true;
   }
 }
 
@@ -310,6 +316,45 @@ describe("LoginWithAccessToken use-case", () => {
       login.execute({ email: SEED_EMAIL, dni: SEED_DNI, token: issued.token }),
     ).rejects.toThrow(InvalidCredentialsError);
     // Solo la primera sesión existe; el replay no crea otra.
+    expect(sessionsRepo.sessions.size).toBe(1);
+  });
+
+  it("markUsed es atómico-condicional: true la primera vez, false después (C1)", async () => {
+    const issue = new IssueAccessToken(users, accessTokensRepo, audits);
+    const issued = await issue.execute({ email: SEED_EMAIL, dni: SEED_DNI });
+    const stored = accessTokensRepo.tokens.get(hashAccessToken(issued.token));
+    expect(stored).toBeDefined();
+
+    // Réplica del UPDATE condicional (`WHERE id = $1 AND used_at IS NULL`):
+    // hay exactamente un consumo ganador; los posteriores son no-ops.
+    const first = await accessTokensRepo.markUsed(stored!.id);
+    expect(first).toBe(true);
+    const second = await accessTokensRepo.markUsed(stored!.id);
+    expect(second).toBe(false);
+  });
+
+  it("dos canjes simultáneos del mismo token: exactamente uno crea sesión (anti-carrera TOCTOU)", async () => {
+    const issue = new IssueAccessToken(users, accessTokensRepo, audits);
+    const issued = await issue.execute({ email: SEED_EMAIL, dni: SEED_DNI });
+    const login = new LoginWithAccessToken(
+      users,
+      accessTokensRepo,
+      sessionsRepo,
+      audits,
+      12,
+    );
+
+    const [first, second] = await Promise.allSettled([
+      login.execute({ email: SEED_EMAIL, dni: SEED_DNI, token: issued.token }),
+      login.execute({ email: SEED_EMAIL, dni: SEED_DNI, token: issued.token }),
+    ]);
+
+    expect(first.status).toBe("fulfilled");
+    expect(second.status).toBe("rejected");
+    if (second.status === "rejected") {
+      expect(second.reason).toBeInstanceOf(InvalidCredentialsError);
+    }
+    // El canje perdedor no crea sesión: solo existe la del ganador.
     expect(sessionsRepo.sessions.size).toBe(1);
   });
 
@@ -542,11 +587,17 @@ function scriptedDb(
       return { rows: row === undefined ? [] : ([row] as T[]) };
     }
     if (text.startsWith("UPDATE access_token")) {
+      // Replica el UPDATE condicional real (`WHERE used_at IS NULL`) y su
+      // rowCount: 1 solo si el token estaba sin usar, 0 si ya estaba usado.
       const id = String((params ?? [])[0]);
+      let updated = 0;
       for (const row of accessTokens.values()) {
-        if (row.id === id) row.used_at = new Date();
+        if (row.id === id && row.used_at === null) {
+          row.used_at = new Date();
+          updated = 1;
+        }
       }
-      return { rows: [] as T[] };
+      return { rows: [] as T[], rowCount: updated };
     }
     if (text.startsWith("INSERT INTO session")) {
       const [userId, tokenHash, expiresAt] = params as [string, string, Date];

@@ -21,7 +21,8 @@ import {
   hashSessionToken,
 } from "../src/infrastructure/crypto/tokens.js";
 import { createApp } from "../src/server.js";
-import type { AuthSession } from "@votaciones2027/shared-types";
+import type { AuditRepository, CreateAuditEventInput } from "../src/domain/repositories/audit-repository.js";
+import type { AuthSession, AuditEvent } from "@votaciones2027/shared-types";
 
 const USER_ID = "11111111-1111-4111-8111-111111111111";
 const PASSWORD = "Strong-Pass-123";
@@ -77,11 +78,32 @@ class FakeSessionRepository implements SessionRepository {
   }
 }
 
+class FakeAuditRepository implements AuditRepository {
+  readonly events: CreateAuditEventInput[] = [];
+
+  async create(input: CreateAuditEventInput): Promise<AuditEvent> {
+    this.events.push(input);
+    return {
+      id: `audit-${this.events.length}`,
+      eventType: input.eventType,
+      entityType: input.entityType,
+      entityId: input.entityId ?? null,
+      ...(input.actorUserId === undefined ? {} : { actorUserId: input.actorUserId }),
+      occurredAt: new Date().toISOString(),
+      payload: input.payload,
+    };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // DbPool scripted: replica las queries SQL REALES de los repos Postgres
 // ---------------------------------------------------------------------------
 
-function scriptedDb(users: UserAccount[], sessions: Map<string, Session>): DbPool {
+function scriptedDb(
+  users: UserAccount[],
+  sessions: Map<string, Session>,
+  auditEvents: unknown[],
+): DbPool {
   const query = async <T>(text: string, params?: unknown[]) => {
     if (text.includes("FROM user_account") && text.includes("WHERE email")) {
       const email = String((params ?? [])[0]);
@@ -116,6 +138,18 @@ function scriptedDb(users: UserAccount[], sessions: Map<string, Session>): DbPoo
         if (session.id === id) session.revokedAt = new Date();
       }
       return { rows: [] as T[] };
+    }
+    if (text.startsWith("INSERT INTO audit_event")) {
+      const row = {
+        id: `audit-http-${auditEvents.length + 1}`,
+        event_type: String((params ?? [])[0]),
+        entity_type: String((params ?? [])[1]),
+        entity_id: (params ?? [])[2] ?? null,
+        actor_user_id: (params ?? [])[3] ?? null,
+        occurred_at: new Date(),
+      };
+      auditEvents.push(row);
+      return { rows: [row] as T[] };
     }
     throw new Error(`Unexpected query in auth test: ${text}`);
   };
@@ -155,7 +189,7 @@ function toSessionRow(session: Session): Record<string, unknown> {
 async function startApp(users: UserAccount[], sessions: Map<string, Session>) {
   const app = createApp(
     loadConfig({ databaseUrl: "postgresql://mock@localhost/mock" }),
-    scriptedDb(users, sessions),
+    scriptedDb(users, sessions, auditEvents),
   );
   await new Promise<void>((resolve) => app.server.listen(0, resolve));
   return app;
@@ -225,10 +259,12 @@ beforeAll(async () => {
 
 let users: FakeUserRepository;
 let sessionsRepo: FakeSessionRepository;
+let audits: FakeAuditRepository;
 
 beforeEach(() => {
   users = new FakeUserRepository([judge]);
   sessionsRepo = new FakeSessionRepository();
+  audits = new FakeAuditRepository();
 });
 
 // ---------------------------------------------------------------------------
@@ -270,7 +306,7 @@ describe("password crypto", () => {
 
 describe("Login use-case", () => {
   it("crea una sesión y devuelve token, expiración y usuario sin hash", async () => {
-    const login = new Login(users, sessionsRepo, 12);
+    const login = new Login(users, sessionsRepo, audits, 12);
     const result: AuthSession = await login.execute({ email: SEED_EMAIL, password: PASSWORD });
 
     expect(result.token.length).toBeGreaterThanOrEqual(32);
@@ -281,8 +317,20 @@ describe("Login use-case", () => {
     expect(sessionsRepo.sessions.size).toBe(1);
   });
 
+  it("audita el inicio de sesión con un evento LOGIN (payload.method = password), §19", async () => {
+    const login = new Login(users, sessionsRepo, audits, 12);
+    await login.execute({ email: SEED_EMAIL, password: PASSWORD });
+
+    const loginEvent = audits.events.find((e) => e.eventType === "LOGIN");
+    expect(loginEvent).toBeDefined();
+    expect(loginEvent?.entityType).toBe("USER");
+    expect(loginEvent?.entityId).toBe(USER_ID);
+    expect(loginEvent?.actorUserId).toBe(USER_ID);
+    expect(loginEvent?.payload).toMatchObject({ method: "password" });
+  });
+
   it("normaliza el email (trim + lowercase)", async () => {
-    const login = new Login(users, sessionsRepo, 12);
+    const login = new Login(users, sessionsRepo, audits, 12);
     const result = await login.execute({
       email: `  ${SEED_EMAIL.toUpperCase()}  `,
       password: PASSWORD,
@@ -291,7 +339,7 @@ describe("Login use-case", () => {
   });
 
   it("rechaza email desconocido con InvalidCredentialsError", async () => {
-    const login = new Login(users, sessionsRepo, 12);
+    const login = new Login(users, sessionsRepo, audits, 12);
     await expect(
       login.execute({ email: "nobody@goya2027.test", password: PASSWORD }),
     ).rejects.toThrow(InvalidCredentialsError);
@@ -300,7 +348,7 @@ describe("Login use-case", () => {
   });
 
   it("rechaza contraseña incorrecta con el mismo error que email desconocido", async () => {
-    const login = new Login(users, sessionsRepo, 12);
+    const login = new Login(users, sessionsRepo, audits, 12);
     let unknownError: unknown;
     let wrongPassError: unknown;
     try {
@@ -328,7 +376,7 @@ describe("Login use-case", () => {
       // no por registro de credenciales.
     };
     const repo = new FakeUserRepository([noLoginUser]);
-    const login = new Login(repo, sessionsRepo, 12);
+    const login = new Login(repo, sessionsRepo, audits, 12);
     await expect(
       login.execute({ email: "sin-login@goya2027.test", password: PASSWORD }),
     ).rejects.toThrow(InvalidCredentialsError);
@@ -407,8 +455,10 @@ describe("Logout use-case", () => {
 
 let serverApp: ReturnType<typeof createApp> | undefined;
 const sessionsMap = new Map<string, Session>();
+const auditEvents: unknown[] = [];
 beforeEach(() => {
   sessionsMap.clear();
+  auditEvents.length = 0;
 });
 
 async function startHttpApp(): Promise<ReturnType<typeof createApp>> {

@@ -52,10 +52,17 @@ export class PostgresAccessTokenRepository implements AccessTokenRepository {
     return row === undefined ? null : mapAccessToken(row);
   }
 
-  async markUsed(id: string): Promise<void> {
-    await this.db.query(
-      `UPDATE access_token SET used_at = now() WHERE id = $1`,
+  /**
+   * Consumo atómico condicional: UPDATE usado con clip `AND used_at IS NULL`.
+   * En PostgreSQL el UPDATE condicional es atómico entre transacciones
+   * concurrentes: solo una reporta rowCount = 1 (token consumido); las demás
+   * reportan 0 (token ya usado) → previene la carrera TOCTOU de doble uso.
+   */
+  async markUsed(id: string): Promise<boolean> {
+    const result = await this.db.query(
+      `UPDATE access_token SET used_at = now() WHERE id = $1 AND used_at IS NULL`,
       [id],
     );
+    return (result.rowCount ?? 0) > 0;
   }
 }
