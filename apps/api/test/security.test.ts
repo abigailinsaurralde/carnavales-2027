@@ -236,7 +236,7 @@ describe("HTTP security", () => {
         "access-control-request-method": "GET",
       });
       expect(res.status).toBe(204);
-      expect(res.headers["access-control-allow-methods"]).toBe("GET, HEAD, POST, OPTIONS");
+      expect(res.headers["access-control-allow-methods"]).toBe("GET, HEAD, POST, PUT, OPTIONS");
     } finally {
       await app.close();
     }

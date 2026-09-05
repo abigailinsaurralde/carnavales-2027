@@ -1,5 +1,6 @@
 import type { UserRole } from "@votaciones2027/shared-types";
 import type { DbPool } from "../../db/pool.js";
+import type { AdminUserRepository } from "../../domain/repositories/admin-user-repository.js";
 import type { UserAccount } from "../../domain/entities/user.js";
 import type { UserRepository } from "../../domain/repositories/user-repository.js";
 
@@ -27,7 +28,9 @@ function mapUser(row: UserRow): UserAccount {
   };
 }
 
-export class PostgresUserRepository implements UserRepository {
+export class PostgresUserRepository
+  implements UserRepository, AdminUserRepository
+{
   constructor(private readonly db: DbPool) {}
 
   async findByEmail(email: string): Promise<UserAccount | null> {
@@ -50,5 +53,16 @@ export class PostgresUserRepository implements UserRepository {
     );
     const row = result.rows[0];
     return row === undefined ? null : mapUser(row);
+  }
+
+  async listByRole(role: UserRole): Promise<UserAccount[]> {
+    const result = await this.db.query<UserRow>(
+      `SELECT id, email, display_name, role, dni, password_hash
+       FROM user_account
+       WHERE role = $1
+       ORDER BY display_name, email`,
+      [role],
+    );
+    return result.rows.map(mapUser);
   }
 }

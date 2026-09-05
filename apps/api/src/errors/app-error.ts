@@ -24,7 +24,7 @@ export class ValidationError extends AppError {
 }
 
 export class DatabaseError extends AppError {
-  constructor(internalMessage: string) {
+  constructor(internalMessage: string, readonly pgCode?: string) {
     super("Database operation failed", 500, "DATABASE_ERROR");
     this.name = "DatabaseError";
     this.internalMessage = internalMessage;

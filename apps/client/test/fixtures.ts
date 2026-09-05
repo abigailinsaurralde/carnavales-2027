@@ -1,4 +1,6 @@
 import type {
+  AdminContextResponse,
+  AdminJudge,
   AuthenticatedUser,
   AuthSession,
   Candidate,
@@ -129,3 +131,44 @@ export const OPERATOR_SESSION: AuthSession = {
 
 export const OPERATOR_EMAIL = OPERATOR_USER.email;
 export const OPERATOR_PASSWORD = "ChangeMe-2027!";
+
+/** Sesión de administración (consola /admin/*). */
+export const ADMIN_USER: AuthenticatedUser = {
+  id: "admin-1",
+  email: "admin@goya2027.test",
+  displayName: "Administrador de prueba",
+  role: "ADMIN",
+};
+
+export const ADMIN_SESSION: AuthSession = {
+  token: "token-admin-1",
+  expiresAt: "2030-01-01T00:00:00.000Z",
+  user: ADMIN_USER,
+};
+
+export const ADMIN_EMAIL = ADMIN_USER.email;
+export const ADMIN_PASSWORD = "ChangeMe-2027!";
+
+/** Contexto mínimo de la consola de administración (contratos reales). */
+export function makeAdminContext(): AdminContextResponse {
+  const judges: AdminJudge[] = [
+    {
+      id: "juez-1",
+      email: JUDGE_EMAIL,
+      displayName: "Juez de Baile",
+      role: "JUDGE",
+    },
+  ];
+  return {
+    edition: { id: EDITION_ID, code: "CAR2027", name: "Carnavales Goya", votingNights: 2 },
+    nights: [
+      { id: NIGHT_ID, editionId: EDITION_ID, number: 1, status: "ABIERTA" },
+    ],
+    specialties: [
+      { id: "sp-baile", code: "BAILE" },
+      { id: "sp-bateria", code: "BATERIA" },
+    ],
+    judges,
+    counts: { comparsas: 2, rubros: 2, items: 3, candidates: 5, assignments: 1 },
+  };
+}

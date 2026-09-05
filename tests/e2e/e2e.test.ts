@@ -23,6 +23,7 @@
  */
 import * as fs from "node:fs";
 import { randomUUID } from "node:crypto";
+import pg from "pg";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import type {
   SyncPlanillaPayload,
@@ -71,9 +72,12 @@ import {
   type E2EHarness,
 } from "./infra.js";
 import {
+  ADMIN_EMAIL,
+  ADMIN_ID,
   CANDIDATE_ID,
   COMPARSA_ID,
   CONFIG_RULES_REF,
+  E2E_DB_URL,
   EDITION_ID,
   ITEM_ID,
   JUDGE_DISPLAY_NAME,
@@ -84,6 +88,7 @@ import {
   NIGHT3_ID,
   RUBRO_ID,
   SPECIALTY_ID,
+  SPECIALTY_VESTUARIO_ID,
 } from "./fixtures.js";
 
 class RollbackProbeError extends Error {}
@@ -884,5 +889,529 @@ describe("HITO E2E real: cliente offline-first -> API real -> PostgreSQL real", 
         [NIGHT3_ID],
       );
     }
+  });
+
+  // -------------------------------------------------------------------------
+  // K. Consola de administración (Slice 1, frontend-espejo contra API real)
+  // -------------------------------------------------------------------------
+
+  test("K. consola admin real: contexto, ABM de catálogo, noche, asignación y auditoría", async () => {
+    // 1. Login de ADMIN real.
+    const login = await apiJson(
+      harness.baseUrl,
+      "POST",
+      "/auth/login",
+      undefined,
+      { email: ADMIN_EMAIL, password: "ChangeMe-2027!" },
+    );
+    expect(login.status).toBe(200);
+    const adminBody = asRecord(login.body);
+    expect(asRecord(adminBody.user).id).toBe(ADMIN_ID);
+    expect(asRecord(adminBody.user).role).toBe("ADMIN");
+    const adminToken = adminBody.token as string;
+
+    // 2. Contexto de la consola.
+    const ctx = await apiJson(harness.baseUrl, "GET", "/admin/context", adminToken);
+    expect(ctx.status).toBe(200);
+    const ctxBody = asRecord(ctx.body);
+    const counts = asRecord(ctxBody.counts);
+    expect(Number(counts.comparsas)).toBeGreaterThanOrEqual(1);
+    // El contexto expone cada especialidad con identidad persistida (id) y
+    // código de dominio (code), de modo que la consola puede construir un
+    // AssignmentInput válido con el UUID real.
+    const specialties = asArray(ctxBody.specialties).map((s) => asRecord(s));
+    expect(specialties.some((s) => s.code === "BAILE" && s.id === SPECIALTY_ID)).toBe(true);
+    expect(specialties.some((s) => s.code === "VESTUARIO" && s.id === SPECIALTY_VESTUARIO_ID)).toBe(true);
+    const specialtyId = specialties.find((s) => s.code === "BAILE")?.id as string;
+    expect(specialtyId).toBe(SPECIALTY_ID);
+    const vestuarioId = specialties.find((s) => s.code === "VESTUARIO")?.id as string;
+    expect(vestuarioId).toBe(SPECIALTY_VESTUARIO_ID);
+    const nights = asArray(ctxBody.nights);
+    expect(nights.length).toBeGreaterThanOrEqual(1);
+    const judges = asArray(ctxBody.judges);
+    expect(judges.some((j) => asRecord(j).id === JUDGE_ID)).toBe(true);
+
+    // 3. ABM de comparsa: crear, listar, actualizar (create/update/list).
+    const code = `E2E-${randomUUID().slice(0, 8)}`.toUpperCase();
+    const created = await apiJson(
+      harness.baseUrl,
+      "POST",
+      "/admin/comparsas",
+      adminToken,
+      { code, name: "Comparsa Admin E2E" },
+    );
+    expect(created.status).toBe(201);
+    const createdItem = asRecord(asRecord(created.body).item);
+    const comparsaId = createdItem.id as string;
+    expect(createdItem.code).toBe(code);
+
+    const list = await apiJson(harness.baseUrl, "GET", "/admin/comparsas", adminToken);
+    expect(list.status).toBe(200);
+    const comparsas = asArray(list.body);
+    expect(comparsas.some((c) => asRecord(c).id === comparsaId)).toBe(true);
+
+    const updated = await apiJson(
+      harness.baseUrl,
+      "PUT",
+      `/admin/comparsas/${comparsaId}`,
+      adminToken,
+      { code, name: "Comparsa Admin Renombrada" },
+    );
+    expect(updated.status).toBe(200);
+    expect(asRecord(asRecord(updated.body).item).name).toBe("Comparsa Admin Renombrada");
+
+    // 4. Rubro (create) con specialty por código (el backend resuelve → ID).
+    const rubroCode = "BAILE";
+    const rubro = await apiJson(
+      harness.baseUrl,
+      "POST",
+      "/admin/rubros",
+      adminToken,
+      { specialty: rubroCode, name: "Rubro Admin E2E", type: "NOMINATIVO" },
+    );
+    expect(rubro.status).toBe(201);
+    const rubroItem = asRecord(asRecord(rubro.body).item);
+    expect(rubroItem.specialty).toBe("BAILE");
+
+    // 5. Ítem del rubro (create).
+    const rubroId = rubroItem.id as string;
+    const item = await apiJson(
+      harness.baseUrl,
+      "POST",
+      `/admin/rubros/${rubroId}/items`,
+      adminToken,
+      { name: "Ítem Admin E2E", orderIndex: 1 },
+    );
+    expect(item.status).toBe(201);
+    const createdItemEntity = asRecord(asRecord(item.body).item);
+    const itemId = createdItemEntity.id as string;
+
+    // 6. Candidato ligado al ítem y a la comparsa recién creada (create).
+    const candidate = await apiJson(
+      harness.baseUrl,
+      "POST",
+      "/admin/candidates",
+      adminToken,
+      { itemId, comparsaId, label: "Candidato Admin E2E" },
+    );
+    expect(candidate.status).toBe(201);
+    expect(asRecord(asRecord(candidate.body).item).comparsaId).toBe(comparsaId);
+
+    // 7. Noche: editar la ventana de votación (update) y limpiar un campo (null).
+    const nightId = asRecord(nights[0]).id as string;
+    const windowUpdate = await apiJson(
+      harness.baseUrl,
+      "PUT",
+      `/admin/nights/${nightId}`,
+      adminToken,
+      { startsAt: "2027-01-15T21:00:00.000Z", endsAt: "2027-01-15T23:59:00.000Z" },
+    );
+    expect(windowUpdate.status).toBe(200);
+    expect(asRecord(windowUpdate.body).startsAt).toBe("2027-01-15T21:00:00.000Z");
+
+    // Limpiar un campo individual (null) — comportamiento del frontend: cada
+    // campo se envía independientemente; el servidor exige al menos un campo.
+    const clearStart = await apiJson(
+      harness.baseUrl,
+      "PUT",
+      `/admin/nights/${nightId}`,
+      adminToken,
+      { startsAt: null },
+    );
+    expect(clearStart.status).toBe(200);
+    expect((asRecord(clearStart.body) as Record<string, unknown>).startsAt).toBeUndefined();
+    expect(asRecord(clearStart.body).endsAt).toBe("2027-01-15T23:59:00.000Z");
+
+    // 8. Asignación existente: ajustar habilitación (update, isEffective=false).
+    const assignments = await apiJson(harness.baseUrl, "GET", "/admin/assignments", adminToken);
+    expect(assignments.status).toBe(200);
+    const assignmentList = asArray(assignments.body);
+    const target = assignmentList.find(
+      (a) => asRecord(a).nightId === nightId && asRecord(a).specialtyId === SPECIALTY_ID,
+    ) as Record<string, unknown>;
+    expect(target).toBeDefined();
+    const assignmentId = target.id as string;
+    const assignmentUpdate = await apiJson(
+      harness.baseUrl,
+      "PUT",
+      `/admin/assignments/${assignmentId}`,
+      adminToken,
+      { ...target, isEffective: false },
+    );
+    expect(assignmentUpdate.status).toBe(200);
+    expect(asRecord(asRecord(assignmentUpdate.body).item).isEffective).toBe(false);
+
+    // 8b. Crear una asignación NUEVA usando el `specialtyId` real del contexto
+    // (gap contractual resuelto): el frontend puede construir un
+    // AssignmentInput con el UUID, sin inventar el mapa código→ID.
+    const newAssignment = await apiJson(
+      harness.baseUrl,
+      "POST",
+      "/admin/assignments",
+      adminToken,
+      { judgeId: JUDGE_ID, nightId: NIGHT2_ID, specialtyId: vestuarioId, isEffective: true },
+    );
+    expect(newAssignment.status).toBe(201);
+    const newAssignmentId = asRecord(asRecord(newAssignment.body).item).id as string;
+    expect(asRecord(asRecord(newAssignment.body).item).specialtyId).toBe(SPECIALTY_VESTUARIO_ID);
+
+    // Consultar la asignación creada.
+    const listAfterCreate = await apiJson(harness.baseUrl, "GET", "/admin/assignments", adminToken);
+    expect(listAfterCreate.status).toBe(200);
+    expect(
+      asArray(listAfterCreate.body).some((a) => asRecord(a).id === newAssignmentId),
+    ).toBe(true);
+
+    // La unicidad existente se respeta: duplicar la combinación juez/noche/
+    // especialidad es rechazado (409).
+    const duplicate = await apiJson(
+      harness.baseUrl,
+      "POST",
+      "/admin/assignments",
+      adminToken,
+      { judgeId: JUDGE_ID, nightId: NIGHT2_ID, specialtyId: vestuarioId, isEffective: true },
+    );
+    expect(duplicate.status).toBe(409);
+
+    // 8c. Una especialidad desconocida es rechazada con 404 controlado: sin
+    // 500, sin fila insertada y sin evento de auditoría.
+    const unknownSpecialty = randomUUID();
+    const unknownSpecialtyPost = await apiJson(
+      harness.baseUrl,
+      "POST",
+      "/admin/assignments",
+      adminToken,
+      { judgeId: JUDGE_ID, nightId: NIGHT2_ID, specialtyId: unknownSpecialty, isEffective: true },
+    );
+    expect(unknownSpecialtyPost.status).toBe(404);
+    expect(asRecord(asRecord(unknownSpecialtyPost.body).error).code).toBe("NOT_FOUND");
+    const unknownSpecialtyAssignment = await harness.db.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM judge_assignment WHERE specialty_id = $1`,
+      [unknownSpecialty],
+    );
+    expect(unknownSpecialtyAssignment.rows[0]?.n ?? 0).toBe(0);
+    const unknownSpecialtyAudit = await harness.db.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM audit_event
+       WHERE event_type = 'ADMIN_ACTION' AND entity_type = 'JUDGE_ASSIGNMENT'
+         AND entity_id = $1`,
+      [unknownSpecialty],
+    );
+    // El caso de uso valida la especialidad ANTES de insertar/auditar.
+    expect(unknownSpecialtyAudit.rows[0]?.n ?? 0).toBe(0);
+
+    // 9. Auditoría: se escribieron ADMIN_ACTION por el actor ADMIN, incluida la
+    // creación de la asignación nueva.
+    const auditCount = await harness.db.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM audit_event
+       WHERE event_type = 'ADMIN_ACTION' AND actor_user_id = $1`,
+      [ADMIN_ID],
+    );
+    expect(auditCount.rows[0]?.n ?? 0).toBeGreaterThanOrEqual(8);
+    const assignmentAudit = await harness.db.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM audit_event
+       WHERE event_type = 'ADMIN_ACTION' AND entity_type = 'JUDGE_ASSIGNMENT'
+         AND entity_id = $1 AND actor_user_id = $2`,
+      [newAssignmentId, ADMIN_ID],
+    );
+    expect(assignmentAudit.rows[0]?.n ?? 0).toBeGreaterThanOrEqual(1);
+
+    // 10. Un juez NO puede acceder a la consola (403).
+    const judgeAttempt = await apiJson(harness.baseUrl, "GET", "/admin/context", sessionToken);
+    expect(judgeAttempt.status).toBe(403);
+    expect(asRecord(asRecord(judgeAttempt.body).error).code).toBe("FORBIDDEN");
+
+    // 11. Un acceso sin credenciales es 401.
+    const anon = await apiJson(harness.baseUrl, "GET", "/admin/context");
+    expect(anon.status).toBe(401);
+  });
+
+  // -------------------------------------------------------------------------
+  // L. Regresión end-to-end: el flujo de juez sigue operativo tras el Slice 1
+  // -------------------------------------------------------------------------
+
+  test("L. regresión: confirmación de juez sigue íntegra tras la consola admin", async () => {
+    // Reusar la planilla 1 (NIGHT1, CONFIRMADA en E) y verificar inmutabilidad.
+    const voteBefore = await harness.db.query<{ score: string }>(
+      `SELECT score FROM vote WHERE planilla_id = $1 AND comparsa_id = $2 LIMIT 1`,
+      [planilla1Id, COMPARSA_ID],
+    );
+    expect(voteBefore.rows.length).toBeGreaterThanOrEqual(1);
+    const score = voteBefore.rows[0].score;
+
+    // La API sigue bloqueando la edición de una planilla confirmada.
+    const blocked = await apiJson(
+      harness.baseUrl,
+      "PUT",
+      `/judge/planillas/${planilla1Id}/votes/${vote1Id}`,
+      sessionToken,
+      {
+        comparsaId: COMPARSA_ID,
+        rubroId: RUBRO_ID,
+        itemId: ITEM_ID,
+        candidateId: CANDIDATE_ID,
+        score: 1,
+        idempotencyKey: randomUUID(),
+      },
+    );
+    expect(blocked.status).toBe(409);
+    expect(asRecord(asRecord(blocked.body).error).code).toBe("PLANILLA_NOT_EDITABLE");
+
+    // El voto confirmado permanece intacto en PostgreSQL.
+    const after = await harness.db.query<{ score: string }>(
+      `SELECT score FROM vote WHERE id = $1`,
+      [vote1Id],
+    );
+    expect(after.rows[0]?.score).toBe(score);
+  });
+
+  // -------------------------------------------------------------------------
+  // M. Privilegios mínimos reales: SET ROLE votaciones_app (S1.4)
+  // -------------------------------------------------------------------------
+  // Verifica la migración 006 contra PostgreSQL REAL: el rol dedicado lee
+  // globalmente, escribe solo lo autorizado (nunca DELETE), la auditoría es
+  // INSERT-only y deliberadamente no puede hacer DDL ni gestionar roles.
+  // Se ejecuta con `SET ROLE votaciones_app` real; el rol del runtime
+  // (desarrollo/E2E) permanece sin cambios (superusuario).
+
+  const APP_ROLE = "votaciones_app";
+  const WRITE_TABLES = [
+    "comparsa",
+    "rubro",
+    "rubro_item",
+    "candidate",
+    "night",
+    "planilla",
+    "vote",
+    "judge_assignment",
+  ] as const;
+  const INSERT_ONLY_TABLES = ["audit_event"] as const;
+
+  describe("M. SET ROLE votaciones_app: privilegios mínimos reales (S1.4)", () => {
+    let pool: pg.Pool;
+
+    beforeAll(() => {
+      pool = new pg.Pool({ connectionString: E2E_DB_URL, max: 1 });
+    });
+
+    afterAll(async () => {
+      await pool.end();
+    });
+
+    // SET ROLE es de sesión: cada probe usa un cliente dedicado aislado.
+    // Las operaciones permitidas corren en una transacción que se deshace
+    // (ROLLBACK) para no contaminar el estado seed.
+    async function runAsApp<T>(fn: (client: pg.PoolClient) => Promise<T>): Promise<T> {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(`SET ROLE ${APP_ROLE}`);
+        const result = await fn(client);
+        await client.query("ROLLBACK");
+        return result;
+      } finally {
+        // Si el probe falló, la transacción quedó abortada; ROLLBACK la
+        // reanuda y la sesión vuelve limpia al pool (siempre con SET ROLE).
+        await client.query("ROLLBACK").catch(() => {});
+        await client.query("RESET ROLE").catch(() => {});
+        client.release();
+      }
+    }
+
+    // Sin transacción envolvente: CREATE ROLE no puede ejecutarse dentro de
+    // una transacción; el fallo de permiso ocurre antes de cualquier efecto.
+    async function expectAppDenied(sql: string, params?: unknown[]): Promise<void> {
+      const client = await pool.connect();
+      try {
+        await client.query(`SET ROLE ${APP_ROLE}`);
+        let error: unknown;
+        try {
+          await client.query(sql, params);
+        } catch (caught) {
+          error = caught;
+        }
+        expect(error, `se esperaba rechazo por privilegios para: ${sql}`).toBeDefined();
+        // SQLSTATE 42501 (insufficient_privilege), independiente del locale.
+        expect((error as { code?: string }).code).toBe("42501");
+      } finally {
+        await client.query("RESET ROLE").catch(() => {});
+        client.release();
+      }
+    }
+
+    interface PrivilegeRow {
+      tablename: string;
+      has_select: boolean;
+      has_insert: boolean;
+      has_update: boolean;
+      has_delete: boolean;
+      has_truncate: boolean;
+    }
+
+    test("M1. el rol es de solo-uso: sin superuser, sin DDL, sin login", async () => {
+      const result = await runAsApp((client) =>
+        client.query<{
+          rolsuper: boolean;
+          rolinherit: boolean;
+          rolcreaterole: boolean;
+          rolcreatedb: boolean;
+          rolcanlogin: boolean;
+          rolreplication: boolean;
+          rolbypassrls: boolean;
+        }>(
+          `SELECT rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolcanlogin,
+                  rolreplication, rolbypassrls
+           FROM pg_roles WHERE rolname = $1`,
+          [APP_ROLE],
+        ),
+      );
+      const role = result.rows[0];
+      expect(role).toBeDefined();
+      expect(role!.rolsuper).toBe(false);
+      expect(role!.rolcreaterole).toBe(false);
+      expect(role!.rolcreatedb).toBe(false);
+      expect(role!.rolcanlogin).toBe(false);
+      expect(role!.rolreplication).toBe(false);
+      expect(role!.rolbypassrls).toBe(false);
+      expect(typeof role!.rolinherit).toBe("boolean");
+    });
+
+    test("M2. schema USAGE, sin CREATE en schema ni en la base", async () => {
+      const result = await runAsApp((client) =>
+        client.query<{
+          usage: boolean;
+          schema_create: boolean;
+          db_connect: boolean;
+          db_create: boolean;
+        }>(
+          `SELECT has_schema_privilege($1, 'public', 'USAGE') AS usage,
+                  has_schema_privilege($1, 'public', 'CREATE') AS schema_create,
+                  has_database_privilege($1, current_database(), 'CONNECT') AS db_connect,
+                  has_database_privilege($1, current_database(), 'CREATE') AS db_create`,
+          [APP_ROLE],
+        ),
+      );
+      expect(result.rows[0]?.usage).toBe(true);
+      expect(result.rows[0]?.schema_create).toBe(false);
+      expect(result.rows[0]?.db_connect).toBe(true);
+      expect(result.rows[0]?.db_create).toBe(false);
+    });
+
+    test("M3. SELECT global en TODAS las tablas; nada borra ni trunca", async () => {
+      const privileges = await runAsApp((client) =>
+        client.query<PrivilegeRow>(
+          `SELECT t.tablename,
+                  has_table_privilege($1, format('public.%I', t.tablename), 'SELECT') AS has_select,
+                  has_table_privilege($1, format('public.%I', t.tablename), 'INSERT') AS has_insert,
+                  has_table_privilege($1, format('public.%I', t.tablename), 'UPDATE') AS has_update,
+                  has_table_privilege($1, format('public.%I', t.tablename), 'DELETE') AS has_delete,
+                  has_table_privilege($1, format('public.%I', t.tablename), 'TRUNCATE') AS has_truncate
+           FROM pg_tables t
+           WHERE t.schemaname = 'public'
+           ORDER BY t.tablename`,
+          [APP_ROLE],
+        ),
+      );
+      const rows = privileges.rows;
+      // El esquema completo debe existir (001–006 aplicadas): 20 tablas.
+      expect(rows.length).toBe(20);
+      for (const row of rows) {
+        expect(row.has_select, `${row.tablename} → SELECT`).toBe(true);
+        expect(row.has_delete, `${row.tablename} → DELETE`).toBe(false);
+        expect(row.has_truncate, `${row.tablename} → TRUNCATE`).toBe(false);
+      }
+    });
+
+    test("M4. escrituras acotadas: create/update solo en S1 + operación; resto solo lectura", async () => {
+      const result = await runAsApp((client) =>
+        client.query<PrivilegeRow>(
+          `SELECT t.tablename,
+                  has_table_privilege($1, format('public.%I', t.tablename), 'INSERT') AS has_insert,
+                  has_table_privilege($1, format('public.%I', t.tablename), 'UPDATE') AS has_update
+           FROM pg_tables t
+           WHERE t.schemaname = 'public'
+           ORDER BY t.tablename`,
+          [APP_ROLE],
+        ),
+      );
+      const byTable = new Map(result.rows.map((r) => [r.tablename, r]));
+      const writable = [...WRITE_TABLES, ...INSERT_ONLY_TABLES];
+      for (const name of writable) {
+        expect(byTable.get(name), `tabla ${name} presente`).toBeDefined();
+      }
+      for (const name of WRITE_TABLES) {
+        expect(byTable.get(name)!.has_insert, `${name}.INSERT`).toBe(true);
+        expect(byTable.get(name)!.has_update, `${name}.UPDATE`).toBe(true);
+      }
+      for (const name of INSERT_ONLY_TABLES) {
+        expect(byTable.get(name)!.has_insert, `${name}.INSERT`).toBe(true);
+        expect(byTable.get(name)!.has_update, `${name}.UPDATE`).toBe(false);
+      }
+      const readOnly = result.rows.filter((r) => !writable.includes(r.tablename));
+      expect(readOnly.length).toBeGreaterThanOrEqual(10);
+      for (const row of readOnly) {
+        expect(row.has_insert, `${row.tablename}.INSERT`).toBe(false);
+        expect(row.has_update, `${row.tablename}.UPDATE`).toBe(false);
+      }
+    });
+
+    test("M5. operaciones de runtime permitidas como votaciones_app, sin persistir", async () => {
+      const comparsaCode = `PRIV-${randomUUID().slice(0, 8)}`;
+      const events = await runAsApp(async (client) => {
+        const select = await client.query<{ n: number }>(
+          `SELECT count(*)::int AS n FROM specialty`,
+        );
+        const comparsaInsert = await client.query<{ id: string }>(
+          `INSERT INTO comparsa (id, edition_id, code, name)
+           VALUES ($1, $2, $3, $4) RETURNING id`,
+          [randomUUID(), EDITION_ID, comparsaCode, "Probe privilegios"],
+        );
+        const nightUpdate = await client.query(
+          `UPDATE night SET ends_at = ends_at WHERE id = $1`,
+          [NIGHT1_ID],
+        );
+        // Habilitación S1: triple (JUDGE, NIGHT3, VESTUARIO) sin colisión con
+        // los seeds BAILE de las tres noches ni con el par NIGHT2/VESTUARIO
+        // creado por el test K.
+        const assignmentInsert = await client.query<{ id: string }>(
+          `INSERT INTO judge_assignment (id, judge_id, night_id, specialty_id, is_effective)
+           VALUES ($1, $2, $3, $4, true) RETURNING id`,
+          [randomUUID(), JUDGE_ID, NIGHT3_ID, SPECIALTY_VESTUARIO_ID],
+        );
+        // Auditoría append-only: el INSERT está permitido.
+        const auditInsert = await client.query(
+          `INSERT INTO audit_event (event_type, entity_type, entity_id, actor_user_id, payload)
+           VALUES ($1, $2, $3, $4, $5::jsonb)`,
+          ["PRIVILEGES_PROBE", "SPECIALTY", SPECIALTY_ID, ADMIN_ID, JSON.stringify({ probe: true })],
+        );
+        return {
+          selectN: select.rows[0]?.n ?? 0,
+          comparsaInserted: comparsaInsert.rowCount ?? 0,
+          nightUpdated: nightUpdate.rowCount ?? 0,
+          assignmentInserted: assignmentInsert.rows[0]?.id,
+          auditInserted: auditInsert.rowCount ?? 0,
+        };
+      });
+      expect(events.selectN).toBeGreaterThanOrEqual(1);
+      expect(events.comparsaInserted).toBe(1);
+      expect(events.nightUpdated).toBe(1);
+      expect(events.assignmentInserted).toBeDefined();
+      expect(events.auditInserted).toBe(1);
+
+      // El ROLLBACK deshizo todo: ninguna fila del probe quedó persistida.
+      const leftovers = await harness.db.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM comparsa WHERE code = $1`,
+        [comparsaCode],
+      );
+      expect(leftovers.rows[0]?.n ?? 0).toBe(0);
+    });
+
+    test("M6. operaciones NO autorizadas rechazadas (DELETE, UPDATE auditoría, DDL, roles)", async () => {
+      await expectAppDenied(`DELETE FROM comparsa`);
+      await expectAppDenied(`DELETE FROM audit_event`);
+      await expectAppDenied(`UPDATE audit_event SET payload = NULL`);
+      await expectAppDenied(`TRUNCATE TABLE comparsa`);
+      await expectAppDenied(`CREATE TABLE public.probe_priv_x (id int)`);
+      await expectAppDenied(`CREATE ROLE probe_role_x`);
+    });
   });
 });

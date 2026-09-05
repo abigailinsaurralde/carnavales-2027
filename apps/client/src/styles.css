@@ -675,6 +675,160 @@ body {
   border-color: var(--info);
 }
 
+/* ---- Consola de administración ---- */
+
+.admin-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  margin-bottom: 14px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.admin-tab {
+  appearance: none;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  min-height: 40px;
+  padding: 6px 14px;
+  white-space: nowrap;
+  touch-action: manipulation;
+}
+
+.admin-tab.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-text);
+}
+
+.admin-stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.admin-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  cursor: pointer;
+  min-height: 84px;
+  justify-content: center;
+}
+
+.admin-stat:active {
+  background: var(--surface-2);
+}
+
+.admin-stat-value {
+  font-size: 1.6rem;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.admin-stat-label {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.admin-panel {
+  margin-bottom: 14px;
+}
+
+.admin-panel-title {
+  margin: 0 0 8px;
+  font-size: 1.05rem;
+}
+
+.admin-plain-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+
+.admin-plain-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 2px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.95rem;
+}
+
+.admin-plain-main {
+  font-weight: 600;
+}
+
+.admin-note {
+  font-size: 0.9rem;
+  margin: 0 0 14px;
+}
+
+.admin-card {
+  margin-bottom: 12px;
+}
+
+.admin-card-title {
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.admin-subhead {
+  margin: 12px 0 4px;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.admin-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.admin-form .field {
+  margin-bottom: 8px;
+}
+
+.admin-form .field input[type="checkbox"] {
+  min-height: 0;
+  width: 26px;
+  height: 26px;
+  transform: scale(1);
+}
+
+.admin-form select {
+  min-height: 48px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 1rem;
+}
+
+.admin-form select:focus {
+  outline: 2px solid var(--primary);
+  border-color: transparent;
+}
+
+.admin-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
 @media (min-width: 640px) {
   .screen {
     padding-bottom: 64px;

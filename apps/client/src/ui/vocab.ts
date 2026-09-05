@@ -1,10 +1,11 @@
 import type {
-  PlanillaStatus,
-  Specialty,
   NightStatus,
+  PlanillaStatus,
   RubroType,
+  Specialty,
 } from "@votaciones2027/shared-types";
 import { errorCode } from "../api/client.js";
+import type { AdminSection } from "./router.js";
 
 /**
  * Vocabulario de presentación: etiquetas legibles para estados y mensajes.
@@ -37,6 +38,15 @@ export const PLANILLA_STATUS_LABELS: Record<PlanillaStatus, string> = {
   CONFIRMADA: "Confirmada",
   SINCRONIZADA: "Sincronizada",
   CERRADA: "Cerrada",
+};
+
+export const ADMIN_SECTION_LABELS: Record<AdminSection, string> = {
+  overview: "Resumen",
+  comparsas: "Comparsas",
+  rubros: "Rubros",
+  candidates: "Candidatos",
+  nights: "Noches",
+  assignments: "Asignaciones",
 };
 
 export interface SyncBadge {
@@ -97,6 +107,15 @@ export function friendlyError(kind: string, body: unknown): string {
   }
   if (code === "IDEMPOTENCY_CONFLICT") {
     return "Hubo un conflicto al guardar. Reintentá la operación.";
+  }
+  if (code === "COMPARSA_CODE_CONFLICT") {
+    return "Ya existe una comparsa con ese código.";
+  }
+  if (code === "CONFLICT") {
+    return "Ya existe un registro igual en el sistema. Revisá los datos.";
+  }
+  if (code === "VALIDATION_ERROR") {
+    return "Los datos ingresados no son válidos. Revisalos e intentá de nuevo.";
   }
   if (kind === "HTTP") {
     return "Ocurrió un error al comunicarse con el sistema. Reintentá.";

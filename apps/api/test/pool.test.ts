@@ -97,4 +97,19 @@ describe("createPool.withTransaction", () => {
     expect(texts).not.toContain("COMMIT");
     expect(client.release).toHaveBeenCalledTimes(1);
   });
+
+  it("conserva el SQLSTATE (pgCode) al envolver errores de query", async () => {
+    // RESUMEN: el pool envuelve los errores de pg en DatabaseError; si el
+    // SQLSTATE (p. ej. 23505 por violación de unicidad) se perdiera, los
+    // repositorios no podrían mapear el conflicto a 409. Regresión del gap.
+    const pgLikeError = Object.assign(new Error("duplicate key value"), {
+      code: "23505",
+    });
+    vi.spyOn(pgMock.MockPool.prototype, "query").mockRejectedValueOnce(pgLikeError);
+    const db = createPool("postgresql://mock@localhost/mock");
+
+    await expect(
+      db.query("INSERT INTO x VALUES ($1)", ["1"]),
+    ).rejects.toMatchObject({ pgCode: "23505" });
+  });
 });

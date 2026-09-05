@@ -1,9 +1,21 @@
 import type {
+  AdminContextResponse,
+  AssignmentInput,
   AuthenticatedUser,
+  Candidate,
+  CandidateInput,
+  Comparsa,
+  ComparsaInput,
   ConfirmPlanillaResult,
+  JudgeAssignmentView,
   JudgeContextResponse,
+  NightUpdateInput,
   PlanillaSummary,
   Planilla,
+  Rubro,
+  RubroInput,
+  RubroItem,
+  RubroItemInput,
   Vote,
 } from "@votaciones2027/shared-types";
 import {
@@ -30,7 +42,12 @@ import {
   type SheetModel,
 } from "../ui/sheet.js";
 import { friendlyError } from "../ui/vocab.js";
-import { createRouter, type Router } from "../ui/router.js";
+import {
+  createRouter,
+  type AdminSection,
+  type Route,
+  type Router,
+} from "../ui/router.js";
 
 export interface PlanillaCard {
   planillaId: string;
@@ -94,6 +111,24 @@ export interface DetailView {
   nightWindow?: { startsAt: string | undefined; endsAt: string | undefined };
 }
 
+/**
+ * Estado de la consola de administración (rol ADMIN).
+ *
+ * El contexto de admin (edición + noches + especialidades + jueces + conteos)
+ * se carga con `GET /admin/context`; las colecciones (comparsas, rubros,
+ * candidatos, asignaciones) se refrescan después de cada operación de guardado
+ * para que el panel siempre muestre el estado confirmado por el servidor.
+ */
+export interface AdminView {
+  context: AdminContextResponse | null;
+  comparsas: Comparsa[];
+  rubros: Rubro[];
+  candidates: Candidate[];
+  assignments: JudgeAssignmentView[];
+  itemsByRubro: Record<string, RubroItem[]>;
+  busy: boolean;
+}
+
 export interface AppViewState {
   route: ReturnType<Router["get"]>;
   user: AuthenticatedUser | null;
@@ -104,6 +139,7 @@ export interface AppViewState {
   detail: DetailView | null;
   notice: { text: string; tone: "info" | "success" | "error" } | null;
   login: LoginView;
+  admin: AdminView;
 }
 
 export interface AppServices {
@@ -147,6 +183,15 @@ export class JudgeApp {
     detail: null,
     notice: null,
     login: defaultLoginView(),
+    admin: {
+      context: null,
+      comparsas: [],
+      rubros: [],
+      candidates: [],
+      assignments: [],
+      itemsByRubro: {},
+      busy: false,
+    },
   };
 
   constructor(services: AppServices) {
@@ -202,13 +247,24 @@ export class JudgeApp {
       return;
     }
     if (signedIn && route.name === "login") {
-      this.services.router.navigate({ name: "home" });
+      this.services.router.navigate(this.homeRouteForSession());
+      return;
+    }
+    if (signedIn && route.name === "admin") {
+      await this.loadAdminIfNeeded();
       return;
     }
     if (signedIn && route.name === "home") {
       await this.refreshAssignments();
       this.emit();
     }
+  }
+
+  /** Ruta de inicio según el rol: los ADMIN entran a la consola de administración. */
+  private homeRouteForSession(): Route {
+    return this.services.session.getUser()?.role === "ADMIN"
+      ? { name: "admin", section: "overview" }
+      : { name: "home" };
   }
 
   async login(email: string, password: string): Promise<void> {
@@ -218,7 +274,7 @@ export class JudgeApp {
       return;
     }
     this.services.session.set(result.data.token, result.data.user);
-    this.services.router.navigate({ name: "home" });
+    this.services.router.navigate(this.homeRouteForSession());
     this.emit();
   }
 
@@ -263,7 +319,7 @@ export class JudgeApp {
     }
     this.services.session.set(result.data.token, result.data.user);
     this.resetLoginView();
-    this.services.router.navigate({ name: "home" });
+    this.services.router.navigate(this.homeRouteForSession());
     this.emit();
   }
 
@@ -295,9 +351,22 @@ export class JudgeApp {
     this.state.context = null;
     this.state.planillas = [];
     this.state.detail = null;
+    this.clearAdmin();
     this.resetLoginView();
     this.services.router.navigate({ name: "login" });
     this.emit();
+  }
+
+  private clearAdmin(): void {
+    this.state.admin = {
+      context: null,
+      comparsas: [],
+      rubros: [],
+      candidates: [],
+      assignments: [],
+      itemsByRubro: {},
+      busy: false,
+    };
   }
 
   // ---- Contexto y planillas ----
@@ -326,6 +395,8 @@ export class JudgeApp {
     if (!signedIn || !this.state.online) return;
     if (route.name === "home" || route.name === "login") {
       await this.refreshAssignments();
+    } else if (route.name === "admin") {
+      await this.loadAdminIfNeeded();
     }
   }
 
@@ -795,6 +866,173 @@ export class JudgeApp {
     }
   }
 
+  // ---- Consola de administración ----
+
+  /** Navega a una sección de la consola (solo rol ADMIN). */
+  async openAdmin(section: AdminSection): Promise<void> {
+    const user = this.services.session.getUser();
+    if (!this.services.session.isSignedIn() || user?.role !== "ADMIN") return;
+    const route = this.services.router.get();
+    if (route.name !== "admin" || route.section !== section) {
+      this.services.router.navigate({ name: "admin", section });
+      return;
+    }
+    await this.loadAdminIfNeeded();
+  }
+
+  /** Carga el contexto de admin y las listas del panel (rol ADMIN). */
+  private async loadAdminIfNeeded(): Promise<void> {
+    const user = this.services.session.getUser();
+    if (!this.services.session.isSignedIn() || user?.role !== "ADMIN") return;
+    if (this.state.admin.context === null) {
+      await this.reloadAdmin();
+      return;
+    }
+    this.emit();
+  }
+
+  private async reloadAdmin(): Promise<void> {
+    if (!this.services.session.isSignedIn()) return;
+    this.state.admin = { ...this.state.admin, busy: true };
+    this.emit();
+
+    const results = await Promise.all([
+      this.services.api.adminContext(),
+      this.services.api.adminListComparsas(),
+      this.services.api.adminListRubros(),
+      this.services.api.adminListCandidates(),
+      this.services.api.adminListAssignments(),
+    ]);
+    if (results.some((r) => isUnauthorized(r))) {
+      this.state.admin = { ...this.state.admin, busy: false };
+      this.emit();
+      this.expireSession();
+      return;
+    }
+    const [contextRes, comparsasRes, rubrosRes, candidatesRes, assignmentsRes] = results;
+    if (!contextRes.ok) {
+      this.state.admin = { ...this.state.admin, busy: false };
+      this.setNotice(friendlyError(contextRes.kind, contextRes.body), "error");
+      return;
+    }
+
+    const itemsByRubro: Record<string, RubroItem[]> = {};
+    for (const rubro of rubrosRes.ok ? rubrosRes.data : []) {
+      const itemsRes = await this.services.api.adminListRubroItems(rubro.id);
+      itemsByRubro[rubro.id] = itemsRes.ok ? itemsRes.data : [];
+    }
+
+    this.state.admin = {
+      context: contextRes.data,
+      comparsas: comparsasRes.ok ? comparsasRes.data : [],
+      rubros: rubrosRes.ok ? rubrosRes.data : [],
+      candidates: candidatesRes.ok ? candidatesRes.data : [],
+      assignments: assignmentsRes.ok ? assignmentsRes.data : [],
+      itemsByRubro,
+      busy: false,
+    };
+    this.emit();
+  }
+
+  /**
+   * Ejecuta una operación de guardado de la consola; sobre error no autorizado
+   * expira la sesión y sobre el resto muestra un mensaje accionable.
+   */
+  private async runAdminOp(op: () => Promise<ApiResult<unknown>>): Promise<boolean> {
+    this.state.admin = { ...this.state.admin, busy: true };
+    this.emit();
+    const result = await op();
+    if (!result.ok) {
+      this.state.admin = { ...this.state.admin, busy: false };
+      if (isUnauthorized(result)) {
+        this.expireSession();
+        return false;
+      }
+      this.setNotice(friendlyError(result.kind, result.body), "error");
+      this.emit();
+      return false;
+    }
+    return true;
+  }
+
+  async adminSaveComparsa(
+    comparsaId: string | undefined,
+    input: ComparsaInput,
+  ): Promise<void> {
+    const op = () =>
+      comparsaId === undefined
+        ? this.services.api.adminCreateComparsa(input)
+        : this.services.api.adminUpdateComparsa(comparsaId, input);
+    if (!(await this.runAdminOp(op))) return;
+    await this.reloadAdmin();
+    this.setNotice(comparsaId === undefined ? "Comparsa creada." : "Comparsa actualizada.", "success");
+  }
+
+  async adminSaveRubro(
+    rubroId: string | undefined,
+    input: RubroInput,
+  ): Promise<void> {
+    const op = () =>
+      rubroId === undefined
+        ? this.services.api.adminCreateRubro(input)
+        : this.services.api.adminUpdateRubro(rubroId, input);
+    if (!(await this.runAdminOp(op))) return;
+    await this.reloadAdmin();
+    this.setNotice(rubroId === undefined ? "Rubro creado." : "Rubro actualizado.", "success");
+  }
+
+  async adminSaveRubroItem(
+    rubroId: string,
+    itemId: string | undefined,
+    input: RubroItemInput,
+  ): Promise<void> {
+    const op = () =>
+      itemId === undefined
+        ? this.services.api.adminCreateRubroItem(rubroId, input)
+        : this.services.api.adminUpdateRubroItem(itemId, input);
+    if (!(await this.runAdminOp(op))) return;
+    await this.reloadAdmin();
+    this.setNotice(itemId === undefined ? "Ítem creado." : "Ítem actualizado.", "success");
+  }
+
+  async adminSaveCandidate(
+    candidateId: string | undefined,
+    input: CandidateInput,
+  ): Promise<void> {
+    const op = () =>
+      candidateId === undefined
+        ? this.services.api.adminCreateCandidate(input)
+        : this.services.api.adminUpdateCandidate(candidateId, input);
+    if (!(await this.runAdminOp(op))) return;
+    await this.reloadAdmin();
+    this.setNotice(candidateId === undefined ? "Candidato creado." : "Candidato actualizado.", "success");
+  }
+
+  async adminSaveAssignment(
+    assignmentId: string | undefined,
+    input: AssignmentInput,
+  ): Promise<void> {
+    const op = () =>
+      assignmentId === undefined
+        ? this.services.api.adminCreateAssignment(input)
+        : this.services.api.adminUpdateAssignment(assignmentId, input);
+    if (!(await this.runAdminOp(op))) return;
+    await this.reloadAdmin();
+    this.setNotice(assignmentId === undefined ? "Asignación creada." : "Asignación actualizada.", "success");
+  }
+
+  async adminSaveNight(nightId: string, input: NightUpdateInput): Promise<void> {
+    const op = () => this.services.api.adminUpdateNight(nightId, input);
+    if (!(await this.runAdminOp(op))) return;
+    await this.reloadAdmin();
+    this.setNotice("Noche actualizada.", "success");
+  }
+
+  /** Recarga el panel (refresco manual tras una sesión larga). */
+  async adminRefresh(): Promise<void> {
+    await this.reloadAdmin();
+  }
+
   // ---- Utilidades ----
 
   /**
@@ -865,6 +1103,7 @@ export class JudgeApp {
     this.state.context = null;
     this.state.planillas = [];
     this.state.detail = null;
+    this.clearAdmin();
     this.resetLoginView();
     this.services.router.navigate({ name: "login" });
     this.emit();
@@ -875,6 +1114,14 @@ export class JudgeApp {
     this.state.route = route;
     if (route.name === "planilla") {
       await this.openPlanilla(route.planillaId);
+    } else if (route.name === "admin") {
+      this.state.detail = null;
+      const user = this.services.session.getUser();
+      if (!this.services.session.isSignedIn() || user?.role !== "ADMIN") {
+        this.services.router.navigate({ name: "home" });
+        return;
+      }
+      await this.loadAdminIfNeeded();
     } else if (route.name === "home") {
       this.state.detail = null;
       if (this.services.session.isSignedIn()) {

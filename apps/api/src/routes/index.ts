@@ -1,5 +1,20 @@
 import { handleGetConfigurationVersion } from "./configuration.js";
 import {
+  handleCreateComparsa,
+  handleGetAdminContext,
+  handleListAssignments,
+  handleListCandidates,
+  handleListComparsas,
+  handleListRubroItems,
+  handleListRubros,
+  handleUpdateComparsa,
+  handleUpdateNight,
+  handleUpsertAssignment,
+  handleUpsertCandidate,
+  handleUpsertRubro,
+  handleUpsertRubroItem,
+} from "./admin.js";
+import {
   handleGetSessionUser,
   handleIssueAccessToken,
   handleLogin,
@@ -63,6 +78,51 @@ export function createRoutes(): readonly Route[] {
       method: "POST",
       path: "/judge/planillas/:planillaId/confirm",
       handler: handleConfirmPlanilla,
+    },
+    { method: "GET", path: "/admin/context", handler: handleGetAdminContext },
+    { method: "GET", path: "/admin/comparsas", handler: handleListComparsas },
+    { method: "POST", path: "/admin/comparsas", handler: handleCreateComparsa },
+    { method: "GET", path: "/admin/rubros", handler: handleListRubros },
+    {
+      method: "GET",
+      path: "/admin/rubros/:rubroId/items",
+      handler: handleListRubroItems,
+    },
+    { method: "POST", path: "/admin/rubros", handler: handleUpsertRubro },
+    {
+      method: "PUT",
+      path: "/admin/comparsas/:comparsaId",
+      handler: handleUpdateComparsa,
+    },
+    {
+      method: "PUT",
+      path: "/admin/rubros/:rubroId",
+      handler: handleUpsertRubro,
+    },
+    {
+      method: "POST",
+      path: "/admin/rubros/:rubroId/items",
+      handler: handleUpsertRubroItem,
+    },
+    { method: "PUT", path: "/admin/items/:itemId", handler: handleUpsertRubroItem },
+    { method: "GET", path: "/admin/candidates", handler: handleListCandidates },
+    { method: "POST", path: "/admin/candidates", handler: handleUpsertCandidate },
+    {
+      method: "PUT",
+      path: "/admin/candidates/:candidateId",
+      handler: handleUpsertCandidate,
+    },
+    {
+      method: "PUT",
+      path: "/admin/nights/:nightId",
+      handler: handleUpdateNight,
+    },
+    { method: "GET", path: "/admin/assignments", handler: handleListAssignments },
+    { method: "POST", path: "/admin/assignments", handler: handleUpsertAssignment },
+    {
+      method: "PUT",
+      path: "/admin/assignments/:assignmentId",
+      handler: handleUpsertAssignment,
     },
   ];
 }

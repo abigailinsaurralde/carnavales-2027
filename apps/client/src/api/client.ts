@@ -1,16 +1,34 @@
 import type {
+  AdminAssignmentResult,
+  AdminCandidateResult,
+  AdminComparsaResult,
+  AdminContextResponse,
+  AdminRubroItemResult,
+  AdminRubroResult,
+  AssignmentInput,
   AuthenticatedUser,
   AuthSession,
+  Candidate,
+  CandidateInput,
+  Comparsa,
+  ComparsaInput,
   ConfirmPlanillaResult,
   IssueAccessTokenRequest,
   IssueAccessTokenResponse,
+  JudgeAssignmentView,
   JudgeContextResponse,
   LoginRequest,
   LoginWithAccessTokenRequest,
+  Night,
+  NightUpdateInput,
   PlanillaDetail,
   PlanillaSummary,
-  VoteUpsertPayload,
+  Rubro,
+  RubroInput,
+  RubroItem,
+  RubroItemInput,
   Vote,
+  VoteUpsertPayload,
 } from "@votaciones2027/shared-types";
 
 /**
@@ -157,6 +175,130 @@ export class ApiClient {
   /** GET /auth/me renovado — gestión de sesión vía POST /auth/logout. */
   // Nota: no existe endpoint de "extender sesión"; la extensión del TTL ocurre
   // por actividad en el servidor ante cualquier request autenticada.
+
+  // ---- Consola de administración (/admin/*, rol ADMIN) ----
+
+  /** GET /admin/context */
+  async adminContext(): Promise<ApiResult<AdminContextResponse>> {
+    return this.send("GET", "/admin/context");
+  }
+
+  /** GET /admin/comparsas */
+  async adminListComparsas(): Promise<ApiResult<Comparsa[]>> {
+    return this.send("GET", "/admin/comparsas");
+  }
+
+  /** POST /admin/comparsas */
+  async adminCreateComparsa(input: ComparsaInput): Promise<ApiResult<AdminComparsaResult>> {
+    return this.send("POST", "/admin/comparsas", { body: input });
+  }
+
+  /** PUT /admin/comparsas/:comparsaId */
+  async adminUpdateComparsa(
+    comparsaId: string,
+    input: ComparsaInput,
+  ): Promise<ApiResult<AdminComparsaResult>> {
+    return this.send("PUT", `/admin/comparsas/${encodeURIComponent(comparsaId)}`, {
+      body: input,
+    });
+  }
+
+  /** GET /admin/rubros */
+  async adminListRubros(): Promise<ApiResult<Rubro[]>> {
+    return this.send("GET", "/admin/rubros");
+  }
+
+  /** POST /admin/rubros */
+  async adminCreateRubro(input: RubroInput): Promise<ApiResult<AdminRubroResult>> {
+    return this.send("POST", "/admin/rubros", { body: input });
+  }
+
+  /** PUT /admin/rubros/:rubroId */
+  async adminUpdateRubro(
+    rubroId: string,
+    input: RubroInput,
+  ): Promise<ApiResult<AdminRubroResult>> {
+    return this.send("PUT", `/admin/rubros/${encodeURIComponent(rubroId)}`, {
+      body: input,
+    });
+  }
+
+  /** GET /admin/rubros/:rubroId/items */
+  async adminListRubroItems(rubroId: string): Promise<ApiResult<RubroItem[]>> {
+    return this.send("GET", `/admin/rubros/${encodeURIComponent(rubroId)}/items`);
+  }
+
+  /** POST /admin/rubros/:rubroId/items */
+  async adminCreateRubroItem(
+    rubroId: string,
+    input: RubroItemInput,
+  ): Promise<ApiResult<AdminRubroItemResult>> {
+    return this.send("POST", `/admin/rubros/${encodeURIComponent(rubroId)}/items`, {
+      body: input,
+    });
+  }
+
+  /** PUT /admin/items/:itemId */
+  async adminUpdateRubroItem(
+    itemId: string,
+    input: RubroItemInput,
+  ): Promise<ApiResult<AdminRubroItemResult>> {
+    return this.send("PUT", `/admin/items/${encodeURIComponent(itemId)}`, {
+      body: input,
+    });
+  }
+
+  /** GET /admin/candidates */
+  async adminListCandidates(): Promise<ApiResult<Candidate[]>> {
+    return this.send("GET", "/admin/candidates");
+  }
+
+  /** POST /admin/candidates */
+  async adminCreateCandidate(input: CandidateInput): Promise<ApiResult<AdminCandidateResult>> {
+    return this.send("POST", "/admin/candidates", { body: input });
+  }
+
+  /** PUT /admin/candidates/:candidateId */
+  async adminUpdateCandidate(
+    candidateId: string,
+    input: CandidateInput,
+  ): Promise<ApiResult<AdminCandidateResult>> {
+    return this.send("PUT", `/admin/candidates/${encodeURIComponent(candidateId)}`, {
+      body: input,
+    });
+  }
+
+  /** GET /admin/assignments */
+  async adminListAssignments(): Promise<ApiResult<JudgeAssignmentView[]>> {
+    return this.send("GET", "/admin/assignments");
+  }
+
+  /** POST /admin/assignments */
+  async adminCreateAssignment(
+    input: AssignmentInput,
+  ): Promise<ApiResult<AdminAssignmentResult>> {
+    return this.send("POST", "/admin/assignments", { body: input });
+  }
+
+  /** PUT /admin/assignments/:assignmentId */
+  async adminUpdateAssignment(
+    assignmentId: string,
+    input: AssignmentInput,
+  ): Promise<ApiResult<AdminAssignmentResult>> {
+    return this.send("PUT", `/admin/assignments/${encodeURIComponent(assignmentId)}`, {
+      body: input,
+    });
+  }
+
+  /** PUT /admin/nights/:nightId */
+  async adminUpdateNight(
+    nightId: string,
+    input: NightUpdateInput,
+  ): Promise<ApiResult<Night>> {
+    return this.send("PUT", `/admin/nights/${encodeURIComponent(nightId)}`, {
+      body: input,
+    });
+  }
 
   // ---- Internos ----
 

@@ -1,13 +1,41 @@
 import type { Child } from "./dom.js";
 import { h } from "./dom.js";
-import { nightLabel, planillaStatusLabel, SPECIALTY_LABELS } from "./vocab.js";
+import {
+  ADMIN_SECTION_LABELS,
+  nightLabel,
+  planillaStatusLabel,
+  NIGHT_STATUS_LABELS,
+  RUBRO_TYPE_LABELS,
+  SPECIALTY_LABELS,
+} from "./vocab.js";
+import { SPECIALTIES } from "@votaciones2027/shared-types";
+import type {
+  Candidate,
+  CandidateInput,
+  Comparsa,
+  ComparsaInput,
+  Night,
+  NightUpdateInput,
+  Rubro,
+  RubroInput,
+  RubroItem,
+  RubroItemInput,
+  RubroType,
+  Specialty,
+} from "@votaciones2027/shared-types";
 import {
   syncBadgeForVote,
   type Cell,
   type DisplayVote,
   type SheetModel,
 } from "./sheet.js";
-import type { AppViewState, DetailView, PlanillaCard } from "../app/app.js";
+import type { AdminSection } from "./router.js";
+import type {
+  AdminView,
+  AppViewState,
+  DetailView,
+  PlanillaCard,
+} from "../app/app.js";
 
 export interface ScreenActions {
   login(email: string, password: string): void;
@@ -28,6 +56,29 @@ export interface ScreenActions {
   setConfirmOpen(on: boolean): void;
   setPickedVoteKey(key: string | undefined): void;
   confirmPlanilla(): void;
+  adminNavigation(section: AdminSection): void;
+  adminRefresh(): void;
+  adminSaveComparsa(comparsaId: string | undefined, input: ComparsaInput): void;
+  adminSaveRubro(rubroId: string | undefined, input: RubroInput): void;
+  adminSaveRubroItem(
+    rubroId: string,
+    itemId: string | undefined,
+    input: RubroItemInput,
+  ): void;
+  adminSaveCandidate(
+    candidateId: string | undefined,
+    input: CandidateInput,
+  ): void;
+  adminSaveAssignment(
+    assignmentId: string | undefined,
+    input: {
+      judgeId: string;
+      nightId: string;
+      specialtyId: string;
+      isEffective: boolean;
+    },
+  ): void;
+  adminSaveNight(nightId: string, input: NightUpdateInput): void;
 }
 
 const STATUS_TONE: Record<string, string> = {
@@ -124,6 +175,7 @@ function renderNav(state: AppViewState, actions: ScreenActions): Child[] {
 
 function renderMain(state: AppViewState, actions: ScreenActions): Child[] {
   if (routeIs(state, "login")) return renderLogin(state, actions);
+  if (routeIs(state, "admin")) return renderAdmin(state, actions);
   if (routeIs(state, "planilla")) {
     if (state.detail === null) {
       return [h("div", { className: "screen" }, [h("p", { className: "muted" }, "Cargando planilla…")])];
@@ -788,4 +840,512 @@ function renderConfirmDialog(
       ]),
     ]),
   ];
+}
+
+// ---- Admin ----
+
+const RUBRO_TYPES: readonly RubroType[] = ["NOMINATIVO", "ALEATORIO"];
+
+function renderAdmin(state: AppViewState, actions: ScreenActions): Child[] {
+  const section =
+    state.route.name === "admin" ? state.route.section : "overview";
+  const admin = state.admin;
+  return [
+    h("section", { className: "screen admin" }, [
+      h("div", { className: "home-head" }, [
+        h("p", { className: "home-kicker muted" }, "Administración · Carnavales Goya 2027"),
+        h("h2", { className: "home-title" }, "Panel de administración"),
+      ]),
+      h("nav", { className: "admin-tabs" }, [
+        ...(Object.keys(ADMIN_SECTION_LABELS) as AdminSection[]).map((s) =>
+          h("button", {
+            className: `admin-tab ${section === s ? "active" : ""}`,
+            onClick: () => actions.adminNavigation(s),
+            ariaLabel: ADMIN_SECTION_LABELS[s],
+          }, ADMIN_SECTION_LABELS[s]),
+        ),
+      ]),
+      ...(admin.busy ? [h("div", { className: "banner banner-warn" }, "Guardando…")] : []),
+      ...renderAdminSection(admin, section, actions),
+    ]),
+  ];
+}
+
+function renderAdminSection(
+  admin: AdminView,
+  section: AdminSection,
+  actions: ScreenActions,
+): Child[] {
+  if (admin.context === null && section !== "overview") {
+    return [h("p", { className: "muted" }, "Cargando datos…")];
+  }
+  switch (section) {
+    case "comparsas":
+      return renderAdminComparsas(admin, actions);
+    case "rubros":
+      return renderAdminRubros(admin, actions);
+    case "candidates":
+      return renderAdminCandidates(admin, actions);
+    case "nights":
+      return renderAdminNights(admin, actions);
+    case "assignments":
+      return renderAdminAssignments(admin, actions);
+    case "overview":
+    default:
+      return renderAdminOverview(admin, actions);
+  }
+}
+
+function renderAdminOverview(
+  admin: AdminView,
+  actions: ScreenActions,
+): Child[] {
+  const context = admin.context;
+  if (context === null) {
+    return [h("p", { className: "muted" }, "Cargando datos…")];
+  }
+  const counts = context.counts;
+  const stats: Array<{ label: string; value: number; section: AdminSection }> = [
+    { label: "Comparsas", value: counts.comparsas, section: "comparsas" },
+    { label: "Rubros", value: counts.rubros, section: "rubros" },
+    { label: "Candidatos", value: counts.candidates, section: "candidates" },
+    { label: "Asignaciones", value: counts.assignments, section: "assignments" },
+  ];
+  return [
+    h("div", { className: "admin-stats" }, [
+      ...stats.map((s) =>
+        h("button", {
+          className: "card admin-stat",
+          onClick: () => actions.adminNavigation(s.section),
+          ariaLabel: `Abrir sección ${s.label}`,
+        }, [
+          h("span", { className: "admin-stat-value" }, String(s.value)),
+          h("span", { className: "admin-stat-label" }, s.label),
+        ]),
+      ),
+    ]),
+    h("div", { className: "admin-panel" }, [
+      h("h3", { className: "admin-panel-title" }, "Jueces"),
+      h("ul", { className: "admin-plain-list" }, [
+        ...context.judges.map((j) =>
+          h("li", { className: "admin-plain-row" }, [
+            h("span", { className: "admin-plain-main" }, j.displayName ?? j.email),
+            h("span", { className: "muted" }, j.email),
+          ]),
+        ),
+      ]),
+      h("p", { className: "muted" },
+        "El alta de jurados reales llega con SVC2-24 (fuera del alcance de este panel)."),
+    ]),
+    h("div", { className: "admin-panel" }, [
+      h("h3", { className: "admin-panel-title" }, "Noches"),
+      h("ul", { className: "admin-plain-list" }, [
+        ...context.nights.map((n) =>
+          h("li", { className: "admin-plain-row" }, [
+            nightLabel(n.number),
+            h("span", { className: "muted" },
+              NIGHT_STATUS_LABELS[n.status] ?? n.status),
+          ]),
+        ),
+      ]),
+    ]),
+    h("div", { className: "admin-panel" }, [
+      h("h3", { className: "admin-panel-title" }, "Especialidades"),
+      h("ul", { className: "admin-plain-list" }, [
+        ...context.specialties.map((s) =>
+          h("li", { className: "admin-plain-row" }, [
+            h("span", { className: "admin-plain-main" }, SPECIALTY_LABELS[s.code] ?? s.code),
+          ]),
+        ),
+      ]),
+    ]),
+  ];
+}
+
+function renderAdminComparsas(
+  admin: AdminView,
+  actions: ScreenActions,
+): Child[] {
+  return [
+    ...admin.comparsas.map((c) => comparsaCard(admin.busy, actions, c)),
+    ...(admin.comparsas.length === 0
+      ? [h("p", { className: "muted empty-state" }, "Todavía no hay comparsas.")]
+      : []),
+    comparsaCard(admin.busy, actions, null),
+  ];
+}
+
+function comparsaCard(
+  busy: boolean,
+  actions: ScreenActions,
+  item: Comparsa | null,
+): Child {
+  let code = item?.code ?? "";
+  let name = item?.name ?? "";
+  return adminCard(
+    item === null ? "Nueva comparsa" : `Comparsa · ${item.code}`,
+    [
+      adminForm(
+        [
+          field("Código", textControl(code, "Código (ej: L03)", (v) => { code = v; })),
+          field("Nombre", textControl(name, "Nombre de la comparsa", (v) => { name = v; })),
+        ],
+        item === null ? "Crear comparsa" : "Guardar cambios",
+        () => actions.adminSaveComparsa(item === null ? undefined : item.id, { code, name }),
+        busy,
+      ),
+    ],
+  );
+}
+
+function renderAdminRubros(
+  admin: AdminView,
+  actions: ScreenActions,
+): Child[] {
+  return [
+    ...admin.rubros.map((r) => rubroCard(admin, actions, r)),
+    ...(admin.rubros.length === 0
+      ? [h("p", { className: "muted empty-state" }, "Todavía no hay rubros.")]
+      : []),
+    rubroCard(admin, actions, null),
+  ];
+}
+
+function rubroCard(
+  admin: AdminView,
+  actions: ScreenActions,
+  rubro: Rubro | null,
+): Child {
+  let specialty = (rubro?.specialty ?? "BAILE") as Specialty;
+  let name = rubro?.name ?? "";
+  let type = (rubro?.type ?? "NOMINATIVO") as RubroType;
+  const specialtyOptions = SPECIALTIES.map((s) => ({
+    value: s,
+    label: SPECIALTY_LABELS[s],
+  }));
+  const typeOptions = RUBRO_TYPES.map((t) => ({
+    value: t,
+    label: RUBRO_TYPE_LABELS[t],
+  }));
+
+  const children: Child[] = [
+    adminForm(
+      [
+        field("Especialidad", selectControl(specialtyOptions, rubro?.specialty ?? "", (v) => { specialty = v as Specialty; })),
+        field("Nombre", textControl(rubro?.name ?? "", "Nombre del rubro", (v) => { name = v; })),
+        field("Tipo", selectControl(typeOptions, rubro?.type ?? "", (v) => { type = v as RubroType; })),
+      ],
+      rubro === null ? "Crear rubro" : "Guardar rubro",
+      () => actions.adminSaveRubro(rubro === null ? undefined : rubro.id, { specialty, name, type }),
+      admin.busy,
+    ),
+  ];
+
+  if (rubro !== null) {
+    const items = admin.itemsByRubro[rubro.id] ?? [];
+    if (items.length > 0) {
+      children.push(h("p", { className: "admin-subhead" }, "Ítems del rubro"));
+      for (const item of items) {
+        children.push(itemCard(admin.busy, actions, rubro.id, item));
+      }
+    }
+    children.push(itemCard(admin.busy, actions, rubro.id, null));
+  }
+
+  return adminCard(rubro === null ? "Nuevo rubro" : `Rubro · ${rubro?.name ?? ""}`, children);
+}
+
+function itemCard(
+  busy: boolean,
+  actions: ScreenActions,
+  rubroId: string,
+  item: RubroItem | null,
+): Child {
+  let name = item?.name ?? "";
+  let orderIndex = String(item?.orderIndex ?? 0);
+  return adminCard(item === null ? "Nuevo ítem" : item.name, [
+    adminForm(
+      [
+        field("Nombre", textControl(item?.name ?? "", "Nombre del ítem", (v) => { name = v; })),
+        field("Orden", h("input", {
+          type: "number",
+          min: 0,
+          step: 1,
+          ...(orderIndex === "" ? {} : { value: orderIndex }),
+          onInput: (e) => { orderIndex = (e.target as HTMLInputElement).value; },
+        })),
+      ],
+      item === null ? "Agregar ítem" : "Guardar ítem",
+      () => actions.adminSaveRubroItem(rubroId, item?.id, { name, orderIndex: Number(orderIndex) }),
+      busy,
+    ),
+  ]);
+}
+
+function renderAdminCandidates(
+  admin: AdminView,
+  actions: ScreenActions,
+): Child[] {
+  return [
+    ...admin.candidates.map((c) => candidateCard(admin, actions, c)),
+    ...(admin.candidates.length === 0
+      ? [h("p", { className: "muted empty-state" }, "Todavía no hay candidatos.")]
+      : []),
+    candidateCard(admin, actions, null),
+  ];
+}
+
+function candidateCard(
+  admin: AdminView,
+  actions: ScreenActions,
+  candidate: Candidate | null,
+): Child {
+  let comparsaId = candidate?.comparsaId ?? "";
+  let itemId = candidate?.itemId ?? "";
+  let label = candidate?.label ?? "";
+  const comparsaOptions = admin.comparsas.map((c) => ({
+    value: c.id,
+    label: c.name,
+  }));
+  const itemOptions = Object.entries(admin.itemsByRubro).flatMap(
+    ([rubroId, items]) => {
+      const rubroName =
+        admin.rubros.find((r) => r.id === rubroId)?.name ?? rubroId;
+      return items.map((i) => ({ value: i.id, label: `${rubroName} · ${i.name}` }));
+    },
+  );
+  return adminCard(
+    candidate === null ? "Nuevo candidato" : candidate.label,
+    [
+      adminForm(
+        [
+          field("Comparsa", selectControl(comparsaOptions, candidate?.comparsaId ?? "", (v) => { comparsaId = v; })),
+          field("Ítem del rubro", selectControl(itemOptions, candidate?.itemId ?? "", (v) => { itemId = v; })),
+          field("Etiqueta", textControl(candidate?.label ?? "", "Etiqueta del candidato", (v) => { label = v; })),
+        ],
+        candidate === null ? "Crear candidato" : "Guardar candidato",
+        () => actions.adminSaveCandidate(candidate?.id, { itemId, comparsaId, label }),
+        admin.busy,
+      ),
+    ],
+  );
+}
+
+function renderAdminNights(
+  admin: AdminView,
+  actions: ScreenActions,
+): Child[] {
+  const nights = admin.context?.nights ?? [];
+  return [
+    h("p", { className: "muted" },
+      "Las transiciones de estado (ABIERTA/CERRADA) están pendientes de definición; acá se edita la fecha y la ventana de votación."),
+    ...nights.map((n) => nightCard(admin.busy, actions, n)),
+    ...(nights.length === 0
+      ? [h("p", { className: "muted empty-state" }, "Sin noches cargadas.")]
+      : []),
+  ];
+}
+
+function nightCard(
+  busy: boolean,
+  actions: ScreenActions,
+  night: Night,
+): Child {
+  let date = toDateInput(night.date ?? "");
+  let startsAt = toDatetimeLocal(night.startsAt ?? "");
+  let endsAt = toDatetimeLocal(night.endsAt ?? "");
+
+  const temporal = (
+    value: string,
+    current: string | undefined,
+  ): string | null | undefined => {
+    if (value !== "") return value;
+    return current === undefined ? undefined : null;
+  };
+
+  return adminCard(
+    `${nightLabel(night.number)} · ${NIGHT_STATUS_LABELS[night.status] ?? night.status}`,
+    [
+      adminForm(
+        [
+          field("Fecha", h("input", {
+            type: "date",
+            ...(date === "" ? {} : { value: date }),
+            onInput: (e) => { date = (e.target as HTMLInputElement).value; },
+          })),
+          field("Inicio de votación", h("input", {
+            type: "datetime-local",
+            ...(startsAt === "" ? {} : { value: startsAt }),
+            onInput: (e) => { startsAt = (e.target as HTMLInputElement).value; },
+          })),
+          field("Fin de votación", h("input", {
+            type: "datetime-local",
+            ...(endsAt === "" ? {} : { value: endsAt }),
+            onInput: (e) => { endsAt = (e.target as HTMLInputElement).value; },
+          })),
+        ],
+        "Guardar noche",
+        () => actions.adminSaveNight(night.id, {
+          ...(temporal(date, night.date) === undefined ? {} : { date: temporal(date, night.date) }),
+          ...(temporal(startsAt, night.startsAt) === undefined ? {} : { startsAt: temporal(startsAt, night.startsAt) }),
+          ...(temporal(endsAt, night.endsAt) === undefined ? {} : { endsAt: temporal(endsAt, night.endsAt) }),
+        }),
+        busy,
+      ),
+    ],
+  );
+}
+
+function renderAdminAssignments(
+  admin: AdminView,
+  actions: ScreenActions,
+): Child[] {
+  return [
+    h("p", { className: "muted admin-note" },
+      "Las asignaciones habilitan a un juez por noche y especialidad. Usá el formulario inferior para crear una combinación nueva; el identificador de especialidad que se envía proviene del contexto de la consola."),
+    ...admin.assignments.map((a) => assignmentCard(admin, actions, a)),
+    ...(admin.assignments.length === 0
+      ? [h("p", { className: "muted empty-state" }, "Sin asignaciones todavía.")]
+      : []),
+    assignmentCard(admin, actions, null),
+  ];
+}
+
+function assignmentCard(
+  admin: AdminView,
+  actions: ScreenActions,
+  assignment: { id: string; judgeId: string; nightId: string; specialtyId: string; isEffective: boolean } | null,
+): Child {
+  const context = admin.context;
+  const judgeOptions = (context?.judges ?? []).map((j) => ({
+    value: j.id,
+    label: j.displayName ?? j.email,
+  }));
+  const nightOptions = (context?.nights ?? []).map((n) => ({
+    value: n.id,
+    label: nightLabel(n.number),
+  }));
+  // La especialidad se selecciona por id real del contexto; la UI etiqueta
+  // con el código de dominio. Esto permite construir un AssignmentInput válido.
+  const specialtyOptions = (context?.specialties ?? []).map((s) => ({
+    value: s.id,
+    label: SPECIALTY_LABELS[s.code] ?? s.code,
+  }));
+  // En una creación nueva el estado interno arranca con el primer elemento
+  // disponible de cada selector (ids reales del contexto), evitando el envío
+  // de un valor vacío que la UI ya no ofrece.
+  let judgeId = assignment?.judgeId ?? (judgeOptions[0]?.value ?? "");
+  let nightId = assignment?.nightId ?? (nightOptions[0]?.value ?? "");
+  let specialtyId = assignment?.specialtyId ?? (specialtyOptions[0]?.value ?? "");
+  let isEffective = assignment?.isEffective ?? true;
+  const judge = context?.judges.find((j) => j.id === assignment?.judgeId);
+  const night = context?.nights.find((n) => n.id === assignment?.nightId);
+  const title =
+    assignment === null
+      ? "Nueva asignación"
+      : `${judge?.displayName ?? judge?.email ?? assignment.judgeId} · ${nightLabel(night?.number ?? 0)}`;
+  return adminCard(title, [
+    adminForm(
+      [
+        field("Juez", selectControl(judgeOptions, judgeId, (v) => { judgeId = v; })),
+        field("Noche", selectControl(nightOptions, nightId, (v) => { nightId = v; })),
+        field("Especialidad", selectControl(specialtyOptions, specialtyId, (v) => { specialtyId = v; })),
+        field("Habilitada", checkboxControl(assignment?.isEffective ?? true, (v) => { isEffective = v; })),
+      ],
+      assignment === null ? "Crear asignación" : "Guardar asignación",
+      () => actions.adminSaveAssignment(assignment?.id, { judgeId, nightId, specialtyId, isEffective }),
+      admin.busy,
+    ),
+  ]);
+}
+
+// ---- Admin: primitivas de formulario ----
+
+function adminCard(title: string, children: Child[]): Child {
+  return h("div", { className: "card admin-card" }, [
+    h("div", { className: "admin-card-title" }, title),
+    ...children,
+  ]);
+}
+
+function adminForm(
+  fields: Child[],
+  submitLabel: string,
+  onSubmit: () => void,
+  busy: boolean,
+): Child {
+  return h("form", {
+    className: "admin-form",
+    onSubmit: (e) => {
+      e.preventDefault();
+      onSubmit();
+    },
+  }, [
+    ...fields,
+    h("div", { className: "admin-form-actions" }, [
+      h("button", { type: "submit", className: "btn btn-primary", disabled: busy }, submitLabel),
+    ]),
+  ]);
+}
+
+function field(label: string, control: Child): Child {
+  return h("label", { className: "field" }, [
+    h("span", { className: "field-label" }, label),
+    control,
+  ]);
+}
+
+function textControl(
+  initial: string,
+  placeholder: string,
+  onChange: (value: string) => void,
+): Child {
+  return h("input", {
+    ...(initial === "" ? {} : { value: initial }),
+    placeholder,
+    onInput: (e) => onChange((e.target as HTMLInputElement).value),
+  });
+}
+
+function selectControl(
+  options: Array<{ value: string; label: string }>,
+  initial: string,
+  onChange: (value: string) => void,
+): Child {
+  const el = document.createElement("select");
+  el.addEventListener("change", () => onChange(el.value));
+  for (const option of options) {
+    const node = document.createElement("option");
+    node.value = option.value;
+    node.textContent = option.label;
+    el.appendChild(node);
+  }
+  if (initial !== "") el.value = initial;
+  return el;
+}
+
+function checkboxControl(
+  initial: boolean,
+  onChange: (value: boolean) => void,
+): Child {
+  const el = document.createElement("input");
+  el.type = "checkbox";
+  el.checked = initial;
+  el.addEventListener("change", () => onChange(el.checked));
+  return el;
+}
+
+function toDateInput(iso: string): string {
+  if (iso === "") return iso;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toISOString().slice(0, 10);
+}
+
+function toDatetimeLocal(iso: string): string {
+  if (iso === "") return iso;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }

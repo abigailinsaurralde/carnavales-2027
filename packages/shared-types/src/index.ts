@@ -11,3 +11,4 @@ export * from "./types/penalty.js";
 export * from "./types/audit.js";
 export * from "./types/result.js";
 export * from "./types/judge-api.js";
+export * from "./types/admin-api.js";

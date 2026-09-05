@@ -19,7 +19,57 @@ export function requireUuidOpt(
   return value;
 }
 
+const MAX_SHORT_TEXT = 200;
+const MAX_CODE_LENGTH = 32;
 const MAX_REF_LENGTH = 512;
+
+/**
+ * Validación técnica (límite de la API) para campos `ShortText` del catálogo
+ * administrativo (nombres de rubros, ítems, candidatos, comparsas). No es una
+ * regla de negocio: es el límite de formato definido por el contrato del PMV.
+ */
+export function requireName(
+  value: unknown,
+  name: string,
+  max = MAX_SHORT_TEXT,
+): string {
+  if (
+    typeof value !== "string" ||
+    value.trim() === "" ||
+    value.length > max
+  ) {
+    throw new ValidationError(
+      `Invalid ${name}: expected a non-empty string up to ${max} characters`,
+    );
+  }
+  return value.trim();
+}
+
+/** Código de comparsa: texto corto normalizado en el límite de la API. */
+export function requireCode(value: unknown, name = "code"): string {
+  if (typeof value !== "string" || value.trim() === "" || value.length > MAX_CODE_LENGTH) {
+    throw new ValidationError(
+      `Invalid ${name}: expected a non-empty string up to ${MAX_CODE_LENGTH} characters`,
+    );
+  }
+  return value.trim();
+}
+
+/** Índice de orden de un ítem: entero no negativo. */
+export function requireOrderIndex(value: unknown, name = "orderIndex"): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    throw new ValidationError(`Invalid ${name}: expected a non-negative integer`);
+  }
+  return value;
+}
+
+/** Booleano estricto para habilitación de asignaciones. */
+export function requireBoolean(value: unknown, name: string): boolean {
+  if (typeof value !== "boolean") {
+    throw new ValidationError(`Invalid ${name}: expected a boolean`);
+  }
+  return value;
+}
 
 export function requireRef(value: unknown, name: string): string {
   if (

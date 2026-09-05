@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-export const ALLOWED_METHODS = ["GET", "HEAD", "POST", "OPTIONS"] as const;
+export const ALLOWED_METHODS = ["GET", "HEAD", "POST", "PUT", "OPTIONS"] as const;
 
 const SECURITY_HEADERS: Readonly<Record<string, string>> = {
   "X-Content-Type-Options": "nosniff",

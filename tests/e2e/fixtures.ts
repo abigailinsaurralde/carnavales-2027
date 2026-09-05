@@ -43,6 +43,8 @@ export const PSQL_BIN = "C:\\Program Files\\PostgreSQL\\18\\bin\\psql.exe";
 export const EDITION_CODE_2027 = "2027";
 export const EDITION_ID = "e2e00001-0000-4000-8000-000000000001";
 export const SPECIALTY_ID = "e2e00001-0000-4000-8000-000000000002";
+/** Especialidad adicional (VESTUARIO) para el flujo de creación de asignaciones. */
+export const SPECIALTY_VESTUARIO_ID = "e2e00001-0000-4000-8000-000000000016";
 export const CONFIG_ID = "e2e00001-0000-4000-8000-000000000003";
 export const SNAPSHOT_ID = "e2e00001-0000-4000-8000-000000000004";
 export const NIGHT1_ID = "e2e00001-0000-4000-8000-000000000005";
@@ -54,6 +56,7 @@ export const RUBRO_ID = "e2e00001-0000-4000-8000-000000000010";
 export const ITEM_ID = "e2e00001-0000-4000-8000-000000000011";
 export const CANDIDATE_ID = "e2e00001-0000-4000-8000-000000000012";
 export const JUDGE_ID = "e2e00002-0000-4000-8000-000000000001";
+export const ADMIN_ID = "e2e00002-0000-4000-8000-000000000002";
 // Noche dedicada al test "I" de ventana (FASE B): número 3, ABIERTA, sin fecha
 // oficial (date NULL). starts_at/ends_at se fijan dentro del propio test.
 export const NIGHT3_ID = "e2e00001-0000-4000-8000-000000000013";
@@ -65,6 +68,8 @@ export const ASSIGNMENT3_ID = "e2e00001-0000-4000-8000-000000000014";
 
 export const JUDGE_EMAIL = "juez.e2e.baile@goya2027.test";
 export const JUDGE_DISPLAY_NAME = "Juez de prueba E2E BAILE";
+export const ADMIN_EMAIL = "admin.e2e@goya2027.test";
+export const ADMIN_DISPLAY_NAME = "Admin de prueba E2E";
 export const TEST_PASSWORD = "ChangeMe-2027!";
 
 /** Hash scrypt de 'ChangeMe-2027!' (idéntico al del seed 002, usuario 1). */
@@ -92,6 +97,10 @@ export const SEED_STATEMENTS: Array<{
     params: [SPECIALTY_ID],
   },
   {
+    sql: `INSERT INTO specialty (id, code, "order") VALUES ($1, 'VESTUARIO', 2)`,
+    params: [SPECIALTY_VESTUARIO_ID],
+  },
+  {
     sql: `INSERT INTO configuration_version
       (id, edition_id, version, status, rules_ref, content_ref)
       VALUES ($1, $2, $3, 'CONGELADA', $4, 'e2e-carnaval-2027-content-ref')`,
@@ -106,6 +115,11 @@ export const SEED_STATEMENTS: Array<{
     sql: `INSERT INTO user_account (id, email, display_name, role, password_hash)
       VALUES ($1, $2, $3, 'JUDGE', $4)`,
     params: [JUDGE_ID, JUDGE_EMAIL, JUDGE_DISPLAY_NAME, JUDGE_PASSWORD_HASH],
+  },
+  {
+    sql: `INSERT INTO user_account (id, email, display_name, role, password_hash)
+      VALUES ($1, $2, $3, 'ADMIN', $4)`,
+    params: [ADMIN_ID, ADMIN_EMAIL, ADMIN_DISPLAY_NAME, JUDGE_PASSWORD_HASH],
   },
   {
     sql: `INSERT INTO comparsa (id, edition_id, code, name) VALUES ($1, $2, 'COMP-E2E', 'Comparsa E2E')`,

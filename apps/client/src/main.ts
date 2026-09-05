@@ -96,6 +96,15 @@ function main(): void {
     setConfirmOpen: (on) => app.setConfirmOpen(on),
     setPickedVoteKey: (key) => app.setPickedVoteKey(key),
     confirmPlanilla: () => void app.confirmPlanilla(),
+    adminNavigation: (section) => app.openAdmin(section),
+    adminRefresh: () => void app.adminRefresh(),
+    adminSaveComparsa: (id, input) => void app.adminSaveComparsa(id, input),
+    adminSaveRubro: (id, input) => void app.adminSaveRubro(id, input),
+    adminSaveRubroItem: (rubroId, id, input) =>
+      void app.adminSaveRubroItem(rubroId, id, input),
+    adminSaveCandidate: (id, input) => void app.adminSaveCandidate(id, input),
+    adminSaveAssignment: (id, input) => void app.adminSaveAssignment(id, input),
+    adminSaveNight: (nightId, input) => void app.adminSaveNight(nightId, input),
   };
 
   app.subscribe(() => mount(root, renderApp(app.getState(), actions)));

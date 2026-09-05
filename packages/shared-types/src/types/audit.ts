@@ -20,6 +20,7 @@ export type AuditEventType =
 
 export type AuditEntityType =
   | "NIGHT"
+  | "COMPARSA"
   | "JUDGE_ASSIGNMENT"
   | "JUDGE_REPLACEMENT"
   | "SPECIALTY"

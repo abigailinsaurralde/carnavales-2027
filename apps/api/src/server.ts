@@ -23,6 +23,11 @@ import { PostgresUserRepository } from "./infrastructure/repositories/postgres-u
 import { PostgresVoteRepository } from "./infrastructure/repositories/postgres-vote-repository.js";
 import { createRoutes, type RouteContext } from "./routes/index.js";
 import { findPathCandidate, matchRoute, type Route } from "./routes/router.js";
+import {
+  classifyTier,
+  createRateLimiter,
+  type RateLimiter,
+} from "./http/rate-limit.js";
 
 const MAX_BODY_BYTES = 1024 * 1024; // 1 MB
 
@@ -53,8 +58,15 @@ export function createApp(config: AppConfig, db: DbPool = createPool(config.data
   const routes = createRoutes();
   const ctx: RouteContext = { app, nodeEnv: config.nodeEnv, corsOrigins: config.corsOrigins };
 
+  const limiter: RateLimiter | null = config.rateLimit.enabled
+    ? createRateLimiter({
+        windowMs: config.rateLimit.windowMs,
+        limits: config.rateLimit.limits,
+      })
+    : null;
+
   const server = createServer((req, res) => {
-    void handleRequest(req, res, routes, ctx, config.nodeEnv);
+    void handleRequest(req, res, routes, ctx, config.nodeEnv, limiter);
   });
 
   return {
@@ -74,6 +86,7 @@ async function handleRequest(
   routes: readonly Route[],
   ctx: RouteContext,
   nodeEnv: string,
+  limiter: RateLimiter | null,
 ): Promise<void> {
   try {
     applySecurityHeaders(res);
@@ -95,6 +108,19 @@ async function handleRequest(
       });
       req.destroy();
       return;
+    }
+
+    if (limiter !== null) {
+      const tier = classifyTier(method ?? "", req.url ?? "");
+      const ip = req.socket.remoteAddress ?? "unknown";
+      const check = limiter.check(`${ip}|${tier}`);
+      if (!check.allowed) {
+        res.setHeader("Retry-After", String(check.retryAfterSeconds));
+        writeJson(res, 429, {
+          error: { code: "TOO_MANY_REQUESTS", message: "Rate limit exceeded" },
+        });
+        return;
+      }
     }
 
     const match = matchRoute(routes, req.method, req.url);
