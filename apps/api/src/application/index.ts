@@ -127,6 +127,7 @@ export function createApplication(
       repos.configurations,
       repos.assignments,
       repos.catalogue,
+      repos.nights,
       repos.uow,
     ),
     syncPlanillas: new SyncPlanillas(

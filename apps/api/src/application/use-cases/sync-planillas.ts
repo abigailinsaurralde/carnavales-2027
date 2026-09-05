@@ -1,6 +1,7 @@
 import type {
   CarnavalEdition,
   DeviceContext,
+  Night,
   PlanillaStatus,
   SyncPlanillaPayload,
   SyncPlanillaResult,
@@ -24,6 +25,7 @@ import type {
 } from "../../domain/repositories/unit-of-work.js";
 import type { UpdateVoteInput } from "../../domain/repositories/vote-repository.js";
 import {
+  ConflictError,
   DatabaseError,
   ForbiddenError,
   NotFoundError,
@@ -32,6 +34,7 @@ import {
 import { requireRef, requireUuid, validateScore } from "../../validation/index.js";
 import type { UseCase } from "../types.js";
 import { VoteValidator } from "../services/vote-validator.js";
+import { assertNightWindowOpen } from "../services/night-window.js";
 
 export interface SyncPlanillasInput {
   judgeId: string;
@@ -405,6 +408,17 @@ export class SyncPlanillas implements UseCase<SyncPlanillasInput, SyncPlanillasR
           mutated: false,
         };
       }
+      // Ventana de votación: gate antes de mutar (excluye el path EXISTS).
+      const existingByIdNight = await tx.nights.findById(planilla.nightId);
+      if (existingByIdNight === null) {
+        return { result: this.rejected(vote.id, "VALIDATION"), mutated: false };
+      }
+      if (!this.isNightWindowOpen(existingByIdNight)) {
+        return {
+          result: this.rejected(vote.id, "NIGHT_WINDOW_CLOSED"),
+          mutated: false,
+        };
+      }
       await tx.votes.update(existingById.id, this.buildUpdateInput(vote));
       return { result: this.applied(existingById.id), mutated: true };
     }
@@ -467,6 +481,17 @@ export class SyncPlanillas implements UseCase<SyncPlanillasInput, SyncPlanillasR
           mutated: false,
         };
       }
+      // Ventana de votación: gate antes de mutar (excluye el path EXISTS).
+      const existingByBusinessNight = await tx.nights.findById(planilla.nightId);
+      if (existingByBusinessNight === null) {
+        return { result: this.rejected(vote.id, "VALIDATION"), mutated: false };
+      }
+      if (!this.isNightWindowOpen(existingByBusinessNight)) {
+        return {
+          result: this.rejected(vote.id, "NIGHT_WINDOW_CLOSED"),
+          mutated: false,
+        };
+      }
       await tx.votes.update(existingByBusiness.id, this.buildUpdateInput(vote));
       return { result: this.applied(existingByBusiness.id), mutated: true };
     }
@@ -496,6 +521,17 @@ export class SyncPlanillas implements UseCase<SyncPlanillasInput, SyncPlanillasR
             mutated: false,
           };
         }
+        // Ventana de votación: gate antes de mutar (excluye el path EXISTS).
+        const existingByRefNight = await tx.nights.findById(planilla.nightId);
+        if (existingByRefNight === null) {
+          return { result: this.rejected(vote.id, "VALIDATION"), mutated: false };
+        }
+        if (!this.isNightWindowOpen(existingByRefNight)) {
+          return {
+            result: this.rejected(vote.id, "NIGHT_WINDOW_CLOSED"),
+            mutated: false,
+          };
+        }
         await tx.votes.update(existingByRef.id, this.buildUpdateInput(vote));
         return { result: this.applied(existingByRef.id), mutated: true };
       }
@@ -510,6 +546,7 @@ export class SyncPlanillas implements UseCase<SyncPlanillasInput, SyncPlanillasR
     }
 
     let nightId: string;
+    let validatedNight: Night;
     try {
       const validated = await this.validator.validateKeyIntegrity({
         judgeId,
@@ -521,6 +558,7 @@ export class SyncPlanillas implements UseCase<SyncPlanillasInput, SyncPlanillasR
         edition,
       });
       nightId = validated.night.id;
+      validatedNight = validated.night;
     } catch (err) {
       if (err instanceof ForbiddenError) {
         return { result: this.rejected(vote.id, "JUDGE_NOT_ASSIGNED"), mutated: false };
@@ -529,6 +567,14 @@ export class SyncPlanillas implements UseCase<SyncPlanillasInput, SyncPlanillasR
         return { result: this.rejected(vote.id, "VALIDATION"), mutated: false };
       }
       throw err;
+    }
+
+    // Ventana de votación: gate antes de mutar (excluye el path EXISTS).
+    if (!this.isNightWindowOpen(validatedNight)) {
+      return {
+        result: this.rejected(vote.id, "NIGHT_WINDOW_CLOSED"),
+        mutated: false,
+      };
     }
 
     await tx.votes.create({
@@ -585,5 +631,23 @@ export class SyncPlanillas implements UseCase<SyncPlanillasInput, SyncPlanillasR
       ...(vote.clientRef === undefined ? {} : { clientRef: vote.clientRef }),
       ...(vote.deviceContext === undefined ? {} : { deviceContext: vote.deviceContext }),
     };
+  }
+
+  /**
+   * true si la ventana de votación de la noche está abierta en el momento del
+   * reloj del servidor. false si la ventana está cerrada (o no definida, en
+   * cuyo caso la ventana NO se aplica: ver assertNightWindowOpen). No lanza:
+   * el sync reporta rechazos por ítem, no excepciones.
+   */
+  private isNightWindowOpen(night: Night): boolean {
+    try {
+      assertNightWindowOpen(night, new Date());
+      return true;
+    } catch (err) {
+      if (err instanceof ConflictError && err.code === "NIGHT_WINDOW_CLOSED") {
+        return false;
+      }
+      throw err;
+    }
   }
 }

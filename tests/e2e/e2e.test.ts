@@ -81,6 +81,7 @@ import {
   JUDGE_ID,
   NIGHT1_ID,
   NIGHT2_ID,
+  NIGHT3_ID,
   RUBRO_ID,
   SPECIALTY_ID,
 } from "./fixtures.js";
@@ -769,5 +770,119 @@ describe("HITO E2E real: cliente offline-first -> API real -> PostgreSQL real", 
     ).toBe(modifiedBefore + 1);
 
     expect(await countEventForEntity(harness.db, "PLANILLA_CREATED", planilla2Id)).toBe(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // I. Ventana de votación de la noche (FASE B)
+  // -------------------------------------------------------------------------
+
+  test("I. ventana de votación: el servidor la aplica a votos y confirmación (create NO se bloquea)", async () => {
+    // Noche 3 dedicada (seed con fecha NULL). Se fija una ventana CERRADA
+    // respecto del reloj del servidor: starts_at = ahora - 1 día,
+    // ends_at = ahora - 1 hora. El servidor es la autoridad temporal; la
+    // pérdida de conectividad NO extiende la ventana (PEND-104).
+    await harness.db.query(
+      `UPDATE night SET starts_at = now() - interval '1 day', ends_at = now() - interval '1 hour' WHERE id = $1`,
+      [NIGHT3_ID],
+    );
+
+    try {
+      // create-planilla NO se bloquea por ventana cerrada (borrador vacío sin
+      // votos: decisión técnica documentada).
+      const created = await apiJson(
+        harness.baseUrl,
+        "POST",
+        "/judge/planillas",
+        sessionToken,
+        { nightId: NIGHT3_ID },
+      );
+      expect(created.status).toBe(201);
+      const planilla3Id = asRecord(asRecord(created.body).planilla).id as string;
+
+      // upsert-vote → 409 NIGHT_WINDOW_CLOSED (escritura de voto bloqueada).
+      const upserted = await apiJson(
+        harness.baseUrl,
+        "PUT",
+        `/judge/planillas/${planilla3Id}/votes/${randomUUID()}`,
+        sessionToken,
+        {
+          comparsaId: COMPARSA_ID,
+          rubroId: RUBRO_ID,
+          itemId: ITEM_ID,
+          candidateId: CANDIDATE_ID,
+          score: 8,
+          idempotencyKey: randomUUID(),
+        },
+      );
+      expect(upserted.status).toBe(409);
+      expect(asRecord(asRecord(upserted.body).error).code).toBe("NIGHT_WINDOW_CLOSED");
+
+      // sync de un borrador → resultado per-vote REJECTED NIGHT_WINDOW_CLOSED,
+      // sin error fatal del sync (HTTP 200, el flujo continúa).
+      const syncPayload: SyncPlanillaPayload = {
+        planilla: {
+          id: planilla3Id,
+          nightId: NIGHT3_ID,
+          clientRef: randomUUID(),
+          status: "BORRADOR",
+        },
+        votes: [
+          {
+            id: randomUUID(),
+            planillaId: planilla3Id,
+            comparsaId: COMPARSA_ID,
+            rubroId: RUBRO_ID,
+            itemId: ITEM_ID,
+            candidateId: CANDIDATE_ID,
+            score: 8,
+            idempotencyKey: randomUUID(),
+            clientRef: randomUUID(),
+          },
+        ],
+      };
+      const synced = await apiJson(
+        harness.baseUrl,
+        "POST",
+        "/judge/planillas/sync",
+        sessionToken,
+        { planillas: [syncPayload] },
+      );
+      expect(synced.status).toBe(200);
+      const syncBody = asRecord(synced.body);
+      const syncPlanillas = asArray(syncBody.planillas);
+      const planillaResult = syncPlanillas.find(
+        (p) => asRecord(p).planillaId === planilla3Id,
+      ) as Record<string, unknown>;
+      expect(planillaResult).toBeDefined();
+      const voteResults = asArray(planillaResult.votes) as Array<Record<string, unknown>>;
+      expect(voteResults.length).toBeGreaterThanOrEqual(1);
+      expect(voteResults[0].action).toBe("REJECTED");
+      expect(voteResults[0].reason).toBe("NIGHT_WINDOW_CLOSED");
+
+      // confirm → 409 NIGHT_WINDOW_CLOSED (la ventana se aplica dentro de la
+      // transacción, antes de confirmar).
+      const confirmed = await apiJson(
+        harness.baseUrl,
+        "POST",
+        `/judge/planillas/${planilla3Id}/confirm`,
+        sessionToken,
+      );
+      expect(confirmed.status).toBe(409);
+      expect(asRecord(asRecord(confirmed.body).error).code).toBe("NIGHT_WINDOW_CLOSED");
+
+      // La planilla NO quedó confirmada ni mutada.
+      const planillaRow = await harness.db.query<{ status: string }>(
+        `SELECT status FROM planilla WHERE id = $1`,
+        [planilla3Id],
+      );
+      expect(planillaRow.rows[0]?.status ?? "").toBe("BORRADOR");
+    } finally {
+      // Dejar el estado limpio: restaurar la ventana a NULL (sin fechas
+      // oficiales) para no afectar tests futuros.
+      await harness.db.query(
+        `UPDATE night SET starts_at = NULL, ends_at = NULL WHERE id = $1`,
+        [NIGHT3_ID],
+      );
+    }
   });
 });

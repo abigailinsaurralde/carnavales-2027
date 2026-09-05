@@ -50,6 +50,21 @@ export interface SheetRow {
   cells: (Cell | null)[];
 }
 
+/**
+ * Total por rubro INFORMATIVO en la fase de carga/revisión.
+ *
+ * `total` = suma de los puntajes que el jurado YA cargó en esa planilla para
+ * el rubro. `pending` = cantidad de ítems elegibles de ese rubro sin nota
+ * cargada. Este total NO imputa omisiones ni aplica la fórmula de negocio
+ * (la subsanación de omisión y el total oficial son del servidor).
+ */
+export interface RubroTotalInfo {
+  rubroId: string;
+  rubroName: string;
+  total: number;
+  pending: number;
+}
+
 export interface SheetModel {
   rubros: Rubro[];
   items: RubroItem[];
@@ -63,6 +78,8 @@ export interface SheetModel {
   omissionsCount: number;
   /** Mapa itemId → rubroId (para construir votos locales). */
   rubroByItem: Map<string, string>;
+  /** Totales por rubro informativos de la fase de carga/revisión. */
+  rubroTotals: RubroTotalInfo[];
 }
 
 /**
@@ -178,6 +195,8 @@ export function buildSheet(
   const rubroByItem = new Map<string, string>();
   for (const item of items) rubroByItem.set(item.id, item.rubroId);
 
+  const rubroTotals = computeRubroTotals(rubros, rows);
+
   return {
     rubros,
     items,
@@ -188,7 +207,52 @@ export function buildSheet(
     scoredCount,
     omissionsCount,
     rubroByItem,
+    rubroTotals,
   };
+}
+
+/**
+ * Calcula los totales por rubro INFORMATIVOS de la fase de carga/revisión.
+ *
+ * Por cada rubro de la especialidad: `total` es la suma de los puntajes que el
+ * jurado ya cargó en la planilla para ese rubro y `pending` es la cantidad de
+ * ítems elegibles (con candidato en la hoja) de ese rubro sin nota cargada.
+ *
+ * NO imputa omisiones ni aplica la fórmula de negocio: el total oficial por
+ * rubro lo calcula el servidor en la confirmación.
+ */
+function computeRubroTotals(
+  rubros: Rubro[],
+  rows: SheetRow[],
+): RubroTotalInfo[] {
+  const totals = new Map<string, number>();
+  const pendingCount = new Map<string, number>();
+
+  for (const rubro of rubros) {
+    totals.set(rubro.id, 0);
+    pendingCount.set(rubro.id, 0);
+  }
+
+  for (const row of rows) {
+    for (const cell of row.cells) {
+      if (cell === null) continue; // no es ítem elegible de la especialidad
+      const rubroTotal = totals.get(cell.rubroId);
+      const rubroPending = pendingCount.get(cell.rubroId);
+      if (rubroTotal === undefined || rubroPending === undefined) continue;
+      if (cell.vote !== null && cell.vote.score !== null) {
+        totals.set(cell.rubroId, rubroTotal + cell.vote.score);
+      } else {
+        pendingCount.set(cell.rubroId, rubroPending + 1);
+      }
+    }
+  }
+
+  return rubros.map((rubro) => ({
+    rubroId: rubro.id,
+    rubroName: rubro.name,
+    total: totals.get(rubro.id) ?? 0,
+    pending: pendingCount.get(rubro.id) ?? 0,
+  }));
 }
 
 /**

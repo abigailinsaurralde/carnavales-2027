@@ -83,6 +83,15 @@ export interface DetailView {
   confirmOpen: boolean;
   busy: boolean;
   pickedVoteKey?: string;
+  /**
+   * Totales por rubro AUTORITATIVOS post-confirmación, devueltos por el
+   * servidor en `ConfirmPlanillaResult.rubroTotals` (mapeados a nombre de
+   * rubro). `null` mientras la planilla no se haya confirmado desde este
+   * dispositivo.
+   */
+  confirmedRubroTotals: Array<{ rubroId: string; rubroName: string; total: number }> | null;
+  /** Ventana de votación de la noche, info NO autoritativa para el header. */
+  nightWindow?: { startsAt: string | undefined; endsAt: string | undefined };
 }
 
 export interface AppViewState {
@@ -577,6 +586,12 @@ export class JudgeApp {
     const confirmedAt =
       this.detailServer?.planilla.confirmedAt ?? localConfirmedAt(local);
 
+    const night = context?.nights.find((n) => n.id === local.nightId);
+    const nightWindow =
+      night !== undefined && (night.startsAt !== undefined || night.endsAt !== undefined)
+        ? { startsAt: night.startsAt, endsAt: night.endsAt }
+        : undefined;
+
     this.state.detail = {
       planillaId,
       nightNumber,
@@ -593,6 +608,11 @@ export class JudgeApp {
       ...(this.state.detail?.pickedVoteKey === undefined
         ? {}
         : { pickedVoteKey: this.state.detail.pickedVoteKey }),
+      ...(this.state.detail?.confirmedRubroTotals === undefined ||
+      this.state.detail?.confirmedRubroTotals === null
+        ? { confirmedRubroTotals: null }
+        : { confirmedRubroTotals: this.state.detail.confirmedRubroTotals }),
+      ...(nightWindow === undefined ? {} : { nightWindow }),
     };
     this.emit();
   }
@@ -730,6 +750,8 @@ export class JudgeApp {
     const detail = this.state.detail;
     if (detail === null) return;
     const planillaId = detail.planillaId;
+    const confirmedRubroTotals = mapRubroTotals(detail.sheet, result.data.rubroTotals);
+    this.state.detail = { ...detail, confirmedRubroTotals };
     const prev = this.services.store.loadPlanilla(planillaId);
     const planilla: LocalPlanilla = {
       id: planillaId,
@@ -879,6 +901,25 @@ function isUnauthorized(result: ApiResult<unknown>): boolean {
 
 function localConfirmedAt(local: LocalPlanilla): string | undefined {
   return local.status === "CONFIRMADA" ? local.updatedAt : undefined;
+}
+
+/**
+ * Mapea los totales por rubro autoritativos del servidor
+ * (`ConfirmPlanillaResult.rubroTotals`) a nombre de rubro para su
+ * visualización en la vista de detalle. Utiliza los rubros ya presentes en la
+ * hoja; los rubros desconocidos se conservan sin nombre.
+ */
+function mapRubroTotals(
+  sheet: SheetModel,
+  totals: ConfirmPlanillaResult["rubroTotals"],
+): NonNullable<DetailView["confirmedRubroTotals"]> {
+  const nameByRubroId = new Map<string, string>();
+  for (const r of sheet.rubros) nameByRubroId.set(r.id, r.name);
+  return totals.map((t) => ({
+    rubroId: t.rubroId,
+    rubroName: nameByRubroId.get(t.rubroId) ?? "",
+    total: t.total,
+  }));
 }
 
 function emptyContext(): JudgeContextResponse {

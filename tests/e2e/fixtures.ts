@@ -54,6 +54,10 @@ export const RUBRO_ID = "e2e00001-0000-4000-8000-000000000010";
 export const ITEM_ID = "e2e00001-0000-4000-8000-000000000011";
 export const CANDIDATE_ID = "e2e00001-0000-4000-8000-000000000012";
 export const JUDGE_ID = "e2e00002-0000-4000-8000-000000000001";
+// Noche dedicada al test "I" de ventana (FASE B): número 3, ABIERTA, sin fecha
+// oficial (date NULL). starts_at/ends_at se fijan dentro del propio test.
+export const NIGHT3_ID = "e2e00001-0000-4000-8000-000000000013";
+export const ASSIGNMENT3_ID = "e2e00001-0000-4000-8000-000000000014";
 
 // ---------------------------------------------------------------------------
 // Credenciales de prueba (misma contraseña que database/seeds/002_seed_test_users.sql)
@@ -118,6 +122,11 @@ export const SEED_STATEMENTS: Array<{
     params: [NIGHT2_ID, EDITION_ID],
   },
   {
+    sql: `INSERT INTO night (id, edition_id, number, date, status)
+      VALUES ($1, $2, 3, NULL, 'ABIERTA')`,
+    params: [NIGHT3_ID, EDITION_ID],
+  },
+  {
     sql: `INSERT INTO judge_assignment
       (id, judge_id, night_id, specialty_id, is_effective)
       VALUES ($1, $2, $3, $4, TRUE)`,
@@ -128,6 +137,12 @@ export const SEED_STATEMENTS: Array<{
       (id, judge_id, night_id, specialty_id, is_effective)
       VALUES ($1, $2, $3, $4, TRUE)`,
     params: [ASSIGNMENT2_ID, JUDGE_ID, NIGHT2_ID, SPECIALTY_ID],
+  },
+  {
+    sql: `INSERT INTO judge_assignment
+      (id, judge_id, night_id, specialty_id, is_effective)
+      VALUES ($1, $2, $3, $4, TRUE)`,
+    params: [ASSIGNMENT3_ID, JUDGE_ID, NIGHT3_ID, SPECIALTY_ID],
   },
   {
     sql: `INSERT INTO rubro (id, edition_id, specialty_id, name, type)

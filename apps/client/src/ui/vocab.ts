@@ -83,6 +83,9 @@ export function friendlyError(kind: string, body: unknown): string {
   if (code === "PLANILLA_NOT_EDITABLE" || code === "VOTE_CONFIRMED_IMMUTABLE") {
     return "La planilla ya está confirmada. No se puede modificar.";
   }
+  if (code === "NIGHT_WINDOW_CLOSED") {
+    return "La ventana de votación de la noche está cerrada.";
+  }
   if (code === "NOT_FOUND") {
     return "No se encontró la planilla. Puede haber sido confirmada o removida.";
   }

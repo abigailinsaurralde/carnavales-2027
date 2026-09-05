@@ -83,6 +83,17 @@ const edition: CarnavalEdition = {
 const nightA: Night = { id: NIGHT_A_ID, editionId: EDITION_ID, number: 1, status: "ABIERTA" };
 const nightB: Night = { id: NIGHT_B_ID, editionId: EDITION_ID, number: 2, status: "ABIERTA" };
 
+// Noches con ventana temporal definida: `endsAt` en el pasado → ventana
+// cerrada respecto del reloj real del servidor (test determinista).
+const nightAClosed: Night = {
+  id: NIGHT_A_ID,
+  editionId: EDITION_ID,
+  number: 1,
+  status: "ABIERTA",
+  startsAt: "2000-01-01T00:00:00Z",
+  endsAt: "2001-01-01T00:00:00Z",
+};
+
 const config: ConfigurationVersion = {
   id: CONFIG_ID,
   editionId: EDITION_ID,
@@ -470,10 +481,16 @@ class FakeUnitOfWork implements UnitOfWork {
     private readonly planillas: FakePlanillaRepository,
     private readonly votes: FakeVoteRepository,
     private readonly audits: FakeAuditRepository,
+    private readonly nights: FakeNightRepository,
   ) {}
 
   async withTransaction<T>(fn: (tx: UnitOfWorkRepositories) => Promise<T>): Promise<T> {
-    return fn({ planillas: this.planillas, votes: this.votes, audits: this.audits });
+    return fn({
+      planillas: this.planillas,
+      votes: this.votes,
+      audits: this.audits,
+      nights: this.nights,
+    });
   }
 }
 
@@ -489,10 +506,10 @@ interface BuiltRepos {
   uow: UnitOfWork;
 }
 
-function buildRepos(): BuiltRepos {
+function buildRepos(nights: Night[] = [nightA, nightB]): BuiltRepos {
   const repos: BuiltRepos = {
     editions: new FakeEditionRepository([edition]),
-    nights: new FakeNightRepository([nightA, nightB]),
+    nights: new FakeNightRepository(nights),
     configurations: new FakeConfigurationRepository([config]),
     assignments: new FakeJudgeAssignmentRepository([assignmentBaileNightA]),
     catalogue: new FakeCatalogueRepository(
@@ -506,7 +523,7 @@ function buildRepos(): BuiltRepos {
     audits: new FakeAuditRepository(),
   };
   repos.planillas.linkVotes(repos.votes);
-  repos.uow = new FakeUnitOfWork(repos.planillas, repos.votes, repos.audits);
+  repos.uow = new FakeUnitOfWork(repos.planillas, repos.votes, repos.audits, repos.nights);
   return repos;
 }
 
@@ -874,6 +891,86 @@ describe("SyncPlanillas use-case", () => {
     // La clave de negocio existe en otra planilla → mismatch.
     expect(result.planillas[0]!.votes[0]!.action).toBe("REJECTED");
     expect(result.planillas[0]!.votes[0]!.reason).toBe("VOTE_PLANILLA_MISMATCH");
+  });
+
+  it("reporta REJECTED NIGHT_WINDOW_CLOSED por ítem cuando la ventana cerró, sin lanzar excepción", async () => {
+    // (d) La ventana gobierna las escrituras: un sync que intenta mutar un voto
+    // con la ventana cerrada se rechaza por ítem, NO como error fatal del sync.
+    const repos = buildRepos([nightAClosed]);
+    const sync = buildSync(repos);
+    seedPlanilla(repos, {});
+    seedVote(repos, { score: 8 });
+
+    const result = await sync.execute({
+      judgeId: JUDGE_ID,
+      payload: {
+        planillas: [syncPlanilla(planillaRef(), [syncVote({ score: 7 })])],
+      },
+    });
+
+    // Sin excepción + flujo que continúa: la planilla resuelve como existente.
+    expect(result.planillas[0]!.planillaAction).toBe("ALREADY_EXISTS");
+    const voteResult = result.planillas[0]!.votes[0]!;
+    expect(voteResult.action).toBe("REJECTED");
+    expect(voteResult.reason).toBe("NIGHT_WINDOW_CLOSED");
+    // El voto NO se mutó.
+    expect((await repos.votes.findById(VOTE_ID))?.score).toBe(8);
+    expect(repos.planillas.touches).toHaveLength(0);
+  });
+
+  it("PEND-104 lock: sincronizar una planilla YA CONFIRMADA no es NIGHT_WINDOW_CLOSED (sin ventana)", async () => {
+    // (g) La semántica existente de inmutabilidad se mantiene: un sync posterior
+    // al cierre de una planilla confirmada DENTRO de la ventana NO es "carga
+    // fuera de tiempo" sino un rechazo por inmutabilidad (PLANILLA_NOT_EDITABLE
+    // / VOTE_CONFIRMED_IMMUTABLE), y no marca la planilla como editada.
+    const repos = buildRepos(); // sin ventana (startsAt/endsAt undefined)
+    const sync = buildSync(repos);
+    seedPlanilla(repos, { status: "CONFIRMADA" });
+    seedVote(repos, { confirmedAt: "2026-02-01T00:00:00Z" });
+
+    const result = await sync.execute({
+      judgeId: JUDGE_ID,
+      payload: {
+        planillas: [syncPlanilla(planillaRef(), [syncVote({ score: 3 })])],
+      },
+    });
+
+    expect(result.planillas[0]!.planillaAction).toBe("ALREADY_EXISTS");
+    const voteResult = result.planillas[0]!.votes[0]!;
+    expect(voteResult.action).toBe("REJECTED");
+    expect(voteResult.reason).not.toBe("NIGHT_WINDOW_CLOSED");
+    expect(["PLANILLA_NOT_EDITABLE", "VOTE_CONFIRMED_IMMUTABLE"]).toContain(
+      voteResult.reason,
+    );
+    // La planilla no se marcó como editada ni se mutó el voto.
+    expect(repos.planillas.touches).toHaveLength(0);
+    expect((await repos.votes.findById(VOTE_ID))?.score).toBe(8.5);
+  });
+
+  it("PEND-104 lock: sincronizar una planilla YA CONFIRMADA no es NIGHT_WINDOW_CLOSED (con ventana cerrada)", async () => {
+    // (g) Aunque la ventana esté cerrada, la confirmación previa es la prioridad:
+    // el resultado sigue siendo PLANILLA_NOT_EDITABLE / VOTE_CONFIRMED_IMMUTABLE.
+    const repos = buildRepos([nightAClosed]);
+    const sync = buildSync(repos);
+    seedPlanilla(repos, { status: "CONFIRMADA" });
+    seedVote(repos, { confirmedAt: "2026-02-01T00:00:00Z" });
+
+    const result = await sync.execute({
+      judgeId: JUDGE_ID,
+      payload: {
+        planillas: [syncPlanilla(planillaRef(), [syncVote({ score: 3 })])],
+      },
+    });
+
+    expect(result.planillas[0]!.planillaAction).toBe("ALREADY_EXISTS");
+    const voteResult = result.planillas[0]!.votes[0]!;
+    expect(voteResult.action).toBe("REJECTED");
+    expect(voteResult.reason).not.toBe("NIGHT_WINDOW_CLOSED");
+    expect(["PLANILLA_NOT_EDITABLE", "VOTE_CONFIRMED_IMMUTABLE"]).toContain(
+      voteResult.reason,
+    );
+    expect(repos.planillas.touches).toHaveLength(0);
+    expect((await repos.votes.findById(VOTE_ID))?.score).toBe(8.5);
   });
 });
 

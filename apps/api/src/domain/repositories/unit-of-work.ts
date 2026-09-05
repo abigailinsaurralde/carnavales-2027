@@ -1,4 +1,5 @@
 import type { AuditRepository } from "./audit-repository.js";
+import type { NightRepository } from "./night-repository.js";
 import type { PlanillaRepository } from "./planilla-repository.js";
 import type { VoteRepository } from "./vote-repository.js";
 
@@ -9,6 +10,7 @@ export interface UnitOfWorkRepositories {
   planillas: PlanillaRepository;
   votes: VoteRepository;
   audits: AuditRepository;
+  nights: NightRepository;
 }
 
 /**

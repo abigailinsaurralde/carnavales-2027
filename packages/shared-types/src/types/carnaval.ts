@@ -19,6 +19,17 @@ export interface Night {
   number: number;
   date?: string;
   status: NightStatus;
+  /**
+   * Inicio de la ventana de votación de la noche (inicio del estado ABIERTA).
+   * ISO-8601. Opcional: mientras sea undefined el servidor NO aplica ventana
+   * (no existen fechas oficiales, PEND-110).
+   */
+  startsAt?: string;
+  /**
+   * Fin de la ventana de votación de la noche (fin del estado ABIERTA).
+   * ISO-8601. Opcional: mientras sea undefined el servidor NO aplica ventana.
+   */
+  endsAt?: string;
 }
 
 export interface Comparsa {

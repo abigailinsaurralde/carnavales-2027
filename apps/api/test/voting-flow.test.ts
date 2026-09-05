@@ -101,6 +101,34 @@ const edition: CarnavalEdition = {
 const nightA: Night = { id: NIGHT_A_ID, editionId: EDITION_ID, number: 1, status: "ABIERTA" };
 const nightB: Night = { id: NIGHT_B_ID, editionId: EDITION_ID, number: 2, status: "ABIERTA" };
 
+// Noches con ventana temporal definida para los tests de FASE B.
+// `endsAt` en el pasado y `startsAt` en el futuro → ventana cerrada respecto
+// del reloj real del servidor (el test no depende del tiempo: siempre cerrada).
+const nightAClosed: Night = {
+  id: NIGHT_A_ID,
+  editionId: EDITION_ID,
+  number: 1,
+  status: "ABIERTA",
+  startsAt: "2000-01-01T00:00:00Z",
+  endsAt: "2001-01-01T00:00:00Z",
+};
+const nightANotStarted: Night = {
+  id: NIGHT_A_ID,
+  editionId: EDITION_ID,
+  number: 1,
+  status: "ABIERTA",
+  startsAt: "2999-01-01T00:00:00Z",
+  endsAt: "2999-02-01T00:00:00Z",
+};
+const nightAOpen: Night = {
+  id: NIGHT_A_ID,
+  editionId: EDITION_ID,
+  number: 1,
+  status: "ABIERTA",
+  startsAt: "2000-01-01T00:00:00Z",
+  endsAt: "2999-01-01T00:00:00Z",
+};
+
 const config: ConfigurationVersion = {
   id: CONFIG_ID,
   editionId: EDITION_ID,
@@ -483,12 +511,18 @@ class FakeUnitOfWork implements UnitOfWork {
     private readonly planillas: FakePlanillaRepository,
     private readonly votes: FakeVoteRepository,
     private readonly audits: FakeAuditRepository,
+    private readonly nights: FakeNightRepository,
   ) {}
 
   async withTransaction<T>(fn: (tx: UnitOfWorkRepositories) => Promise<T>): Promise<T> {
     // En memoria no hay commit/rollback reales: los repos comparten el mismo
     // estado subyacente, por lo que la transacción es transparente.
-    return fn({ planillas: this.planillas, votes: this.votes, audits: this.audits });
+    return fn({
+      planillas: this.planillas,
+      votes: this.votes,
+      audits: this.audits,
+      nights: this.nights,
+    });
   }
 }
 
@@ -504,10 +538,10 @@ interface BuiltRepos {
   uow: UnitOfWork;
 }
 
-function buildFakes(): BuiltRepos {
+function buildFakes(nights: Night[] = [nightA, nightB]): BuiltRepos {
   const repos: BuiltRepos = {
     editions: new FakeEditionRepository([edition]),
-    nights: new FakeNightRepository([nightA, nightB]),
+    nights: new FakeNightRepository(nights),
     configurations: new FakeConfigurationRepository([config]),
     assignments: new FakeJudgeAssignmentRepository([assignmentBaileNightA]),
     catalogue: new FakeCatalogueRepository(
@@ -524,7 +558,7 @@ function buildFakes(): BuiltRepos {
     audits: new FakeAuditRepository(),
   };
   repos.planillas.linkVotes(repos.votes);
-  repos.uow = new FakeUnitOfWork(repos.planillas, repos.votes, repos.audits);
+  repos.uow = new FakeUnitOfWork(repos.planillas, repos.votes, repos.audits, repos.nights);
   return repos;
 }
 
@@ -544,7 +578,8 @@ function buildConfirm(repos: BuiltRepos): ConfirmPlanilla {
     repos.configurations,
     repos.assignments,
     repos.catalogue,
-    new FakeUnitOfWork(repos.planillas, repos.votes, repos.audits),
+    repos.nights,
+    new FakeUnitOfWork(repos.planillas, repos.votes, repos.audits, repos.nights),
   );
 }
 
@@ -838,6 +873,59 @@ describe("UpsertVote use-case", () => {
       uc.execute({ judgeId: JUDGE_ID, planillaId, voteId: VOTE_ID, payload: validVotePayload({ score: 8.55 }) }),
     ).rejects.toThrow(ValidationError);
   });
+
+  it("rechaza (NIGHT_WINDOW_CLOSED) escribir un voto cuando la ventana ya cerró (endsAt pasado)", async () => {
+    const repos = buildFakes([nightAClosed]);
+    await withPlanilla(repos);
+    const uc = buildUpsert(repos);
+
+    await expect(
+      uc.execute({ judgeId: JUDGE_ID, planillaId, voteId: VOTE_ID, payload: validVotePayload() }),
+    ).rejects.toMatchObject({ code: "NIGHT_WINDOW_CLOSED" });
+    expect(repos.votes.votes).toHaveLength(0);
+  });
+
+  it("rechaza (NIGHT_WINDOW_CLOSED) escribir un voto cuando la ventana aún no abrió (startsAt futuro)", async () => {
+    const repos = buildFakes([nightANotStarted]);
+    await withPlanilla(repos);
+    const uc = buildUpsert(repos);
+
+    await expect(
+      uc.execute({ judgeId: JUDGE_ID, planillaId, voteId: VOTE_ID, payload: validVotePayload() }),
+    ).rejects.toMatchObject({ code: "NIGHT_WINDOW_CLOSED" });
+    expect(repos.votes.votes).toHaveLength(0);
+  });
+
+  it("no bloquea (PEND-110) un voto cuando la noche no tiene fechas de ventana (startsAt/endsAt undefined)", async () => {
+    // Regresión: sin fechas oficiales no hay ventana que aplicar.
+    const repos = buildFakes();
+    await withPlanilla(repos);
+    const uc = buildUpsert(repos);
+
+    const vote = await uc.execute({
+      judgeId: JUDGE_ID,
+      planillaId,
+      voteId: VOTE_ID,
+      payload: validVotePayload(),
+    });
+    expect(vote).toMatchObject({ id: VOTE_ID, score: 8.5 });
+    expect(repos.votes.votes).toHaveLength(1);
+  });
+
+  it("permite escribir dentro de una ventana abierta (ventana cumplida)", async () => {
+    const repos = buildFakes([nightAOpen]);
+    await withPlanilla(repos);
+    const uc = buildUpsert(repos);
+
+    const vote = await uc.execute({
+      judgeId: JUDGE_ID,
+      planillaId,
+      voteId: VOTE_ID,
+      payload: validVotePayload(),
+    });
+    expect(vote).toMatchObject({ id: VOTE_ID, score: 8.5 });
+    expect(repos.votes.votes).toHaveLength(1);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -980,6 +1068,34 @@ describe("ConfirmPlanilla use-case", () => {
 
     await expect(uc.execute({ judgeId: JUDGE_ID, planillaId: PLANILLA_ID })).rejects.toThrow(ConflictError);
   });
+
+  it("rechaza (NIGHT_WINDOW_CLOSED) confirmar cuando la ventana de la noche está cerrada", async () => {
+    const repos = buildFakes([nightAClosed]);
+    await seedPlanilla(repos);
+    const uc = buildConfirm(repos);
+
+    await expect(uc.execute({ judgeId: JUDGE_ID, planillaId: PLANILLA_ID })).rejects.toMatchObject({
+      code: "NIGHT_WINDOW_CLOSED",
+    });
+    const stored = await repos.planillas.findById(PLANILLA_ID);
+    expect(stored?.status).toBe("BORRADOR");
+  });
+
+  it("confirma con ventana cumplida o sin ventana (regresión)", async () => {
+    // Sin ventana (startsAt/endsAt undefined): confirmación OK.
+    const reposNoWindow = buildFakes();
+    await seedPlanilla(reposNoWindow);
+    const ucNoWindow = buildConfirm(reposNoWindow);
+    const resultNoWindow = await ucNoWindow.execute({ judgeId: JUDGE_ID, planillaId: PLANILLA_ID });
+    expect(resultNoWindow.planilla.status).toBe("CONFIRMADA");
+
+    // Con ventana abierta (cumplida): confirmación OK.
+    const reposOpen = buildFakes([nightAOpen]);
+    await seedPlanilla(reposOpen);
+    const ucOpen = buildConfirm(reposOpen);
+    const resultOpen = await ucOpen.execute({ judgeId: JUDGE_ID, planillaId: PLANILLA_ID });
+    expect(resultOpen.planilla.status).toBe("CONFIRMADA");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1010,6 +1126,8 @@ interface DbNight {
   number: number;
   date: string | null;
   status: string;
+  starts_at?: string | null;
+  ends_at?: string | null;
 }
 
 interface DbConfig {
@@ -1825,6 +1943,25 @@ describe("Voting Flow HTTP: planillas", () => {
       await app.close();
     }
   });
+
+  it("POST /judge/planillas NO se bloquea por ventana cerrada (decisión técnica del borrador vacío)", async () => {
+    const store = makeStore();
+    const token = seedSession(store, JUDGE_ID);
+    const night = store.nights.find((n) => n.id === NIGHT_A_ID)!;
+    night.starts_at = "2000-01-01T00:00:00.000Z";
+    night.ends_at = "2001-01-01T00:00:00.000Z";
+    const app = await startApp(store);
+    try {
+      const res = await jsonRequest(app.server, "/judge/planillas", authHeaders(token), { nightId: NIGHT_A_ID }, "POST");
+      // create-planilla no aplica la ventana (el borrador vacío no es una
+      // escritura de votos): debe crearse aunque la ventana esté cerrada.
+      expect(res.status).toBe(201);
+      expect(res.body).toMatchObject({ created: true });
+      expect(store.planillas).toHaveLength(1);
+    } finally {
+      await app.close();
+    }
+  });
 });
 
 describe("Voting Flow HTTP: upsert de voto", () => {
@@ -2112,6 +2249,74 @@ describe("Voting Flow HTTP: upsert de voto", () => {
       await app.close();
     }
   });
+
+  it("PUT voto: 409 NIGHT_WINDOW_CLOSED con la ventana de la noche cerrada (endsAt pasado)", async () => {
+    const store = makeStore();
+    const token = seedSession(store, JUDGE_ID);
+    const night = store.nights.find((n) => n.id === NIGHT_A_ID)!;
+    night.starts_at = "2000-01-01T00:00:00.000Z";
+    night.ends_at = "2001-01-01T00:00:00.000Z";
+    seedPlanilla(store);
+    const app = await startApp(store);
+    try {
+      const res = await jsonRequest(
+        app.server,
+        `/judge/planillas/${PLANILLA_ID}/votes/${VOTE_ID}`,
+        authHeaders(token),
+        validVotePayload(),
+        "PUT",
+      );
+      expect(res.status).toBe(409);
+      expect(res.body).toMatchObject({ error: { code: "NIGHT_WINDOW_CLOSED" } });
+      expect(store.votes).toHaveLength(0);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("PUT voto: 409 NIGHT_WINDOW_CLOSED con la ventana aún no abierta (startsAt futuro)", async () => {
+    const store = makeStore();
+    const token = seedSession(store, JUDGE_ID);
+    const night = store.nights.find((n) => n.id === NIGHT_A_ID)!;
+    night.starts_at = "2999-01-01T00:00:00.000Z";
+    night.ends_at = "2999-02-01T00:00:00.000Z";
+    seedPlanilla(store);
+    const app = await startApp(store);
+    try {
+      const res = await jsonRequest(
+        app.server,
+        `/judge/planillas/${PLANILLA_ID}/votes/${VOTE_ID}`,
+        authHeaders(token),
+        validVotePayload(),
+        "PUT",
+      );
+      expect(res.status).toBe(409);
+      expect(res.body).toMatchObject({ error: { code: "NIGHT_WINDOW_CLOSED" } });
+      expect(store.votes).toHaveLength(0);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("PUT voto: 200 sin ventana (startsAt/endsAt null — PEND-110) — regresión sin bloqueo", async () => {
+    const store = makeStore();
+    const token = seedSession(store, JUDGE_ID);
+    seedPlanilla(store);
+    const app = await startApp(store);
+    try {
+      const res = await jsonRequest(
+        app.server,
+        `/judge/planillas/${PLANILLA_ID}/votes/${VOTE_ID}`,
+        authHeaders(token),
+        validVotePayload(),
+        "PUT",
+      );
+      expect(res.status).toBe(200);
+      expect(store.votes).toHaveLength(1);
+    } finally {
+      await app.close();
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -2309,6 +2514,128 @@ describe("Voting Flow HTTP: confirmación de planilla", () => {
     try {
       const res = await jsonRequest(app.server, "/judge/planillas/not-a-uuid/confirm", authHeaders(token), undefined, "POST");
       expect(res.status).toBe(400);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("POST confirm: devuelve rubroTotals correctos tras subsanación (SVC2-64), ordenados por rubroId", async () => {
+    const store = makeStore();
+    const token = seedSession(store, JUDGE_ID);
+    // Planilla con votos en 2 rubros: Baile 8.5 y Vestuario 7.0. Ambos
+    // candidatos ya votados → sin omisiones; el total por rubro replica el
+    // valor exacto persistido, ordenado por rubroId.
+    seedPlanilla(store);
+    seedVote(store, { id: VOTE_ID, rubro_id: RUBRO_ID, item_id: ITEM_ID, candidate_id: CANDIDATE_ID, score: 8.5 });
+    seedVote(store, { id: VOTE2_ID, rubro_id: VESTUARIO_RUBRO_ID, item_id: VESTUARIO_ITEM_ID, candidate_id: VESTUARIO_CANDIDATE_ID, score: 7.0 });
+    const app = await startApp(store);
+
+    try {
+      const res = await jsonRequest(
+        app.server,
+        `/judge/planillas/${PLANILLA_ID}/confirm`,
+        authHeaders(token),
+        undefined,
+        "POST",
+      );
+      expect(res.status).toBe(200);
+      const body = res.body as { votesConfirmed: number; omissionsInserted: number; rubroTotals: Array<{ rubroId: string; total: number }> };
+      expect(body.votesConfirmed).toBe(2);
+      expect(body.omissionsInserted).toBe(0);
+      // Orden determinista por rubroId: "55555555..." < "65555555...".
+      expect(body.rubroTotals).toEqual([
+        { rubroId: RUBRO_ID, total: 8.5 },
+        { rubroId: VESTUARIO_RUBRO_ID, total: 7.0 },
+      ]);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("POST confirm: rubroTotals computa omisión = 5 en el rubro correspondiente del ítem omitido", async () => {
+    const store = makeStore();
+    const token = seedSession(store, JUDGE_ID);
+    // Sólo voto en Vestuario (7.0). El candidato de Baile es elegible (la
+    // especialidad del juez es BAILE) y no tiene voto → en la subsanación se
+    // inserta con 5 en su rubro. El Vestuario NO es especialidad asignada, no
+    // se subsana (sólo se mantiene el voto cargado).
+    seedPlanilla(store);
+    seedVote(store, { id: VOTE2_ID, rubro_id: VESTUARIO_RUBRO_ID, item_id: VESTUARIO_ITEM_ID, candidate_id: VESTUARIO_CANDIDATE_ID, score: 7.0 });
+    const app = await startApp(store);
+
+    try {
+      const res = await jsonRequest(
+        app.server,
+        `/judge/planillas/${PLANILLA_ID}/confirm`,
+        authHeaders(token),
+        undefined,
+        "POST",
+      );
+      expect(res.status).toBe(200);
+      const body = res.body as { votesConfirmed: number; omissionsInserted: number; rubroTotals: Array<{ rubroId: string; total: number }> };
+      expect(body.votesConfirmed).toBe(1);
+      expect(body.omissionsInserted).toBe(1);
+      const omitted = store.votes.find((v) => v.score_source === "OMISSION_CORRECTION");
+      expect(omitted).toMatchObject({ rubro_id: RUBRO_ID, score: 5, candidate_id: CANDIDATE_ID });
+      expect(body.rubroTotals).toEqual([
+        { rubroId: RUBRO_ID, total: 5 },
+        { rubroId: VESTUARIO_RUBRO_ID, total: 7.0 },
+      ]);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("POST confirm: 409 NIGHT_WINDOW_CLOSED dentro de la transacción cuando la ventana cerró", async () => {
+    const store = makeStore();
+    const token = seedSession(store, JUDGE_ID);
+    const night = store.nights.find((n) => n.id === NIGHT_A_ID)!;
+    night.starts_at = "2000-01-01T00:00:00.000Z";
+    night.ends_at = "2001-01-01T00:00:00.000Z";
+    seedPlanilla(store);
+    seedVote(store);
+    const app = await startApp(store);
+
+    try {
+      const res = await jsonRequest(
+        app.server,
+        `/judge/planillas/${PLANILLA_ID}/confirm`,
+        authHeaders(token),
+        undefined,
+        "POST",
+      );
+      expect(res.status).toBe(409);
+      expect(res.body).toMatchObject({ error: { code: "NIGHT_WINDOW_CLOSED" } });
+      // Sin mutación: la planilla sigue BORRADOR y el voto sin confirmar.
+      const stored = store.planillas.find((p) => p.id === PLANILLA_ID);
+      expect(stored?.status).toBe("BORRADOR");
+      const vote = store.votes.find((v) => v.id === VOTE_ID);
+      expect(vote?.confirmed_at).toBeNull();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("POST confirm: confirma OK con ventana cumplida o sin ventana (regresión)", async () => {
+    const store = makeStore();
+    const token = seedSession(store, JUDGE_ID);
+    const night = store.nights.find((n) => n.id === NIGHT_A_ID)!;
+    night.starts_at = "2000-01-01T00:00:00.000Z";
+    night.ends_at = "2999-01-01T00:00:00.000Z";
+    seedPlanilla(store);
+    seedVote(store);
+    const app = await startApp(store);
+    try {
+      const res = await jsonRequest(
+        app.server,
+        `/judge/planillas/${PLANILLA_ID}/confirm`,
+        authHeaders(token),
+        undefined,
+        "POST",
+      );
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ planilla: { status: "CONFIRMADA" } });
+      expect(store.planillas.find((p) => p.id === PLANILLA_ID)?.status).toBe("CONFIRMADA");
     } finally {
       await app.close();
     }

@@ -1,14 +1,14 @@
 import type { Night } from "@votaciones2027/shared-types";
-import type { DbPool } from "../../db/pool.js";
+import type { QueryRunner } from "../../db/pool.js";
 import type { NightRepository } from "../../domain/repositories/night-repository.js";
 import { mapNight, type NightRow } from "../mappers/mappers.js";
 
 export class PostgresNightRepository implements NightRepository {
-  constructor(private readonly db: DbPool) {}
+  constructor(private readonly db: QueryRunner) {}
 
   async findById(id: string): Promise<Night | null> {
     const result = await this.db.query<NightRow>(
-      `SELECT id, edition_id, number, date, status
+      `SELECT id, edition_id, number, date, status, starts_at, ends_at
        FROM night
        WHERE id = $1`,
       [id],
@@ -20,7 +20,7 @@ export class PostgresNightRepository implements NightRepository {
 
   async findByEdition(editionId: string): Promise<Night[]> {
     const result = await this.db.query<NightRow>(
-      `SELECT id, edition_id, number, date, status
+      `SELECT id, edition_id, number, date, status, starts_at, ends_at
        FROM night
        WHERE edition_id = $1
        ORDER BY number`,

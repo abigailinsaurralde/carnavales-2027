@@ -78,6 +78,50 @@ describe("eligibleCandidatesFor / buildSheet", () => {
   });
 });
 
+describe("rubroTotals (FASE B) — totales informativos por rubro", () => {
+  it("suma los puntajes cargados por rubro y cuenta los pendientes", () => {
+    const serverVotes = [
+      makeServerVote("can-1-1", "cmp-1", "r-baile", "i-1", 7),
+      makeServerVote("can-2-1", "cmp-2", "r-baile", "i-1", 3),
+    ];
+    const sheet = buildSheet(context, assignment, serverVotes, []);
+
+    // Un único rubro de la especialidad (r-baile); 4 candidatos elegibles en
+    // 2 ítems × 2 comparsas. Los 2 votos suman 10 → total=10, pending=2.
+    expect(sheet.rubroTotals).toHaveLength(1);
+    expect(sheet.rubroTotals[0]).toMatchObject({
+      rubroId: "r-baile",
+      rubroName: "Baile",
+      total: 10,
+      pending: 2,
+    });
+  });
+
+  it("sin notas: total 0 y todos los ítems pendientes", () => {
+    const sheet = buildSheet(context, assignment, [], []);
+    expect(sheet.rubroTotals[0]).toMatchObject({
+      rubroId: "r-baile",
+      total: 0,
+      pending: 4,
+    });
+  });
+
+  it("NO imputa omisiones: un ítem sin nota queda como pending y NO suma 5", () => {
+    // Sólo una nota cargada (7). El resto de los ítems queda sin nota y debe
+    // permanecer como pending (sin imputar 5). El total informativo refleja
+    // únicamente la suma de notas cargadas del jurado.
+    const serverVotes = [makeServerVote("can-1-1", "cmp-1", "r-baile", "i-1", 7)];
+    const sheet = buildSheet(context, assignment, serverVotes, []);
+    expect(sheet.rubroTotals[0]).toMatchObject({
+      rubroId: "r-baile",
+      total: 7,
+      pending: 3,
+    });
+    // El total NO debe incluir imputación de omisiones (no suma 5 por pendiente).
+    expect(sheet.rubroTotals[0]!.total).toBe(7);
+  });
+});
+
 describe("toLocalVote", () => {
   it("convierte una nota de presentación a copia local pendiente", () => {
     const planilla: LocalPlanilla = {

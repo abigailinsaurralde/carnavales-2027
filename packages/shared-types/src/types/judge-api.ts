@@ -63,10 +63,21 @@ export interface VoteUpsertPayload {
   deviceContext?: DeviceContext;
 }
 
+export interface RubroTotal {
+  rubroId: string;
+  total: number;
+}
+
 export interface ConfirmPlanillaResult {
   planilla: Planilla;
   votesConfirmed: number;
   omissionsInserted: number;
+  /**
+   * Totales por rubro de la planilla tras la subsanación de omisiones,
+   * calculados por el servidor (autoridad del total por rubro; SVC2-64).
+   * Valores ya materializados en la planilla, ordenados por rubroId.
+   */
+  rubroTotals: RubroTotal[];
 }
 
 export interface SyncVotePayload {

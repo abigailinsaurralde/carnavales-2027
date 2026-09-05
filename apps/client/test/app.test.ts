@@ -159,6 +159,7 @@ function serverFetch(server: StubServer) {
         planilla,
         votesConfirmed: votes.length,
         omissionsInserted: 0,
+        rubroTotals: [],
       };
       return json(200, result);
     }

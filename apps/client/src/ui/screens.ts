@@ -439,6 +439,8 @@ function renderPlanilla(state: AppViewState, actions: ScreenActions): Child[] {
         `${d.sheet.scoredCount} nota(s) cargadas`,
         d.sheet.omissionsCount > 0 ? ` · ${d.sheet.omissionsCount} ítem(s) sin nota` : "",
       ]),
+      ...renderRubroTotalsInfo(d),
+      ...(d.nightWindow !== undefined ? renderNightWindow(d) : []),
       ...(d.blockedReasons.length > 0
         ? [h("div", { className: "banner banner-warn" }, d.blockedReasons.join(" "))]
         : []),
@@ -456,7 +458,92 @@ function renderReadonlyNote(d: DetailView): Child[] {
     h("div", { className: "readonly-note" }, [
       "Esta planilla ya está confirmada. Las notas que figuran son las definitivas y no pueden modificarse.",
     ]),
+    ...renderAuthoritativeRubroTotals(d),
   ];
+}
+
+/**
+ * Líneas informativas (no oficiales) por rubro de la fase de carga/revisión:
+ * subtotal cargado por el jurado y conteo de pendientes de ese rubro.
+ * Solo lectura, no destacadas como resultado oficial.
+ */
+function renderRubroTotalsInfo(d: DetailView): Child[] {
+  if (d.sheet.rubroTotals.length === 0) return [];
+  return [
+    h("div", { className: "rubro-totals muted", role: "note" }, [
+      ...d.sheet.rubroTotals.map(
+        (r) =>
+          h("div", { className: "rubro-total" }, [
+            h("span", { className: "rubro-total-name" }, r.rubroName),
+            h("span", { className: "rubro-total-value" },
+              `subtotal ${r.total}` +
+              (r.pending > 0 ? ` · ${r.pending} sin nota` : "")),
+          ]),
+      ),
+    ]),
+  ];
+}
+
+/**
+ * Totales por rubro AUTORITATIVOS post-confirmación, devueltos por el
+ * servidor en `ConfirmPlanillaResult.rubroTotals`. Se muestran como resultado
+ * oficial cuando la confirmación ocurrió desde este dispositivo.
+ */
+function renderAuthoritativeRubroTotals(d: DetailView): Child[] {
+  if (d.confirmedRubroTotals === null || d.confirmedRubroTotals.length === 0) {
+    return [];
+  }
+  return [
+    h("div", { className: "rubro-totals rubro-totals-confirmed" }, [
+      h("p", { className: "rubro-totals-title" }, "Totales por rubro (oficial)"),
+      ...d.confirmedRubroTotals.map(
+        (t) =>
+          h("div", { className: "rubro-total" }, [
+            h("span", { className: "rubro-total-name" }, t.rubroName),
+            h("span", { className: "rubro-total-value" }, `total ${t.total}`),
+          ]),
+      ),
+    ]),
+  ];
+}
+
+/**
+ * Totales por rubro en la vista de revisión: informativos durante la carga
+ * (subtotal del jurado + pendientes) y autoritativos post-confirmación.
+ */
+function renderReviewRubroTotals(d: DetailView): Child[] {
+  if (d.confirmedRubroTotals !== null && d.confirmedRubroTotals.length > 0) {
+    return renderAuthoritativeRubroTotals(d);
+  }
+  return renderRubroTotalsInfo(d);
+}
+
+/** Ventana de votación de la noche como texto informativo NO autoritativo. */
+function renderNightWindow(d: DetailView): Child[] {
+  return [
+    h("div", { className: "night-window muted" },
+      `Ventana de votación: ${formatWindow(d.nightWindow!)}`),
+  ];
+}
+
+function formatWindow(w: {
+  startsAt: string | undefined;
+  endsAt: string | undefined;
+}): string {
+  const start = w.startsAt === undefined ? "—" : shortDateTime(w.startsAt);
+  const end = w.endsAt === undefined ? "—" : shortDateTime(w.endsAt);
+  return `${start} → ${end}`;
+}
+
+function shortDateTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString("es-AR", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function chipForSync(sync: string): { label: string; tone: string } | null {
@@ -648,6 +735,7 @@ function renderReview(
                 `${d.sheet.omissionsCount} ítem(s) quedaron sin nota: al confirmar se computan con 5 por omisión.`),
             ]
           : []),
+        ...renderReviewRubroTotals(d),
         h("div", { className: "review-actions" }, [
           h("button", { className: "btn btn-secondary", onClick: () => actions.setReviewing(false) },
             "Volver a las notas"),

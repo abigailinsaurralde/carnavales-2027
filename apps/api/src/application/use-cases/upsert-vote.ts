@@ -19,6 +19,7 @@ import {
 } from "../../validation/index.js";
 import type { UseCase } from "../types.js";
 import { VoteValidator } from "../services/vote-validator.js";
+import { assertNightWindowOpen } from "../services/night-window.js";
 
 export interface UpsertVoteInput {
   judgeId: string;
@@ -110,6 +111,10 @@ export class UpsertVote implements UseCase<UpsertVoteInput, Vote> {
         );
       }
 
+      // Ventana de votación: último gate antes de mutar (nunca en el path
+      // idempotente).
+      assertNightWindowOpen(night, new Date());
+
       const updateInput = {
         score,
         idempotencyKey,
@@ -165,7 +170,9 @@ export class UpsertVote implements UseCase<UpsertVoteInput, Vote> {
       }
 
       // El cliente reenvía su voto con otro id: UPDATE del existente
-      // (conserva su id original).
+      // (conserva su id original). Último gate antes de mutar.
+      assertNightWindowOpen(night, new Date());
+
       const updateInput = {
         score,
         idempotencyKey,
@@ -193,6 +200,9 @@ export class UpsertVote implements UseCase<UpsertVoteInput, Vote> {
     }
 
     // 6. INSERT (PUT idempotente: esta es la primera creación del voto).
+    // Último gate antes de escribir.
+    assertNightWindowOpen(night, new Date());
+
     return await this.votes.create({
       id: voteId,
       planillaId: planilla.id,

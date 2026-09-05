@@ -26,6 +26,9 @@ export interface NightRow {
   number: number;
   date: string | null;
   status: string;
+  // Opcionales para no romper mocks de tests existentes.
+  starts_at?: string | null;
+  ends_at?: string | null;
 }
 
 export function mapNight(row: NightRow): Night {
@@ -35,5 +38,7 @@ export function mapNight(row: NightRow): Night {
     number: row.number,
     ...(row.date === null ? {} : { date: row.date }),
     status: row.status as Night["status"],
+    ...(row.starts_at == null ? {} : { startsAt: row.starts_at }),
+    ...(row.ends_at == null ? {} : { endsAt: row.ends_at }),
   };
 }

@@ -4,6 +4,7 @@ import type {
   UnitOfWorkRepositories,
 } from "../../domain/repositories/unit-of-work.js";
 import { PostgresAuditRepository } from "./postgres-audit-repository.js";
+import { PostgresNightRepository } from "./postgres-night-repository.js";
 import { PostgresPlanillaRepository } from "./postgres-planilla-repository.js";
 import { PostgresVoteRepository } from "./postgres-vote-repository.js";
 
@@ -22,6 +23,7 @@ export class PostgresUnitOfWork implements UnitOfWork {
         planillas: new PostgresPlanillaRepository(runner),
         votes: new PostgresVoteRepository(runner),
         audits: new PostgresAuditRepository(runner),
+        nights: new PostgresNightRepository(runner),
       }),
     );
   }

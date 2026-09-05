@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
-import type { ConfirmPlanillaResult } from "@votaciones2027/shared-types";
+import type {
+  ConfirmPlanillaResult,
+  RubroTotal,
+  Vote,
+} from "@votaciones2027/shared-types";
 import { CARNAVAL_2027_RULES } from "@votaciones2027/shared-types";
 import { EDITION_CODE_2027 } from "../constants.js";
 import { isEditablePlanilla, toSharedPlanilla } from "../../domain/entities/planilla.js";
@@ -7,6 +11,7 @@ import type { CatalogueRepository } from "../../domain/repositories/catalogue-re
 import type { ConfigurationRepository } from "../../domain/repositories/configuration-repository.js";
 import type { EditionRepository } from "../../domain/repositories/edition-repository.js";
 import type { JudgeAssignmentRepository } from "../../domain/repositories/judge-assignment-repository.js";
+import type { NightRepository } from "../../domain/repositories/night-repository.js";
 import type { UnitOfWork } from "../../domain/repositories/unit-of-work.js";
 import {
   ConflictError,
@@ -16,10 +21,28 @@ import {
 } from "../../errors/app-error.js";
 import { requireUuid } from "../../validation/index.js";
 import type { UseCase } from "../types.js";
+import { assertNightWindowOpen } from "../services/night-window.js";
 
 export interface ConfirmPlanillaInput {
   judgeId: string;
   planillaId: string;
+}
+
+/**
+ * SVC2-64: el servidor es autoridad del total por rubro de la planilla.
+ * Bookkeeping de valores YA materializados (votos confirmados + omisiones
+ * insertadas): agrupa por rubroId, suma scores y ordena de forma determinista
+ * por rubroId. NO duplica lógica de scoring-engine (no calcula nada: solo
+ * agrega puntajes persistidos).
+ */
+function computeRubroTotals(votes: Vote[]): RubroTotal[] {
+  const totalsByRubro = new Map<string, number>();
+  for (const vote of votes) {
+    totalsByRubro.set(vote.rubroId, (totalsByRubro.get(vote.rubroId) ?? 0) + vote.score);
+  }
+  return [...totalsByRubro.entries()]
+    .map(([rubroId, total]) => ({ rubroId, total }))
+    .sort((a, b) => (a.rubroId < b.rubroId ? -1 : a.rubroId > b.rubroId ? 1 : 0));
 }
 
 /**
@@ -50,6 +73,7 @@ export class ConfirmPlanilla
     private readonly configurations: ConfigurationRepository,
     private readonly assignments: JudgeAssignmentRepository,
     private readonly catalogue: CatalogueRepository,
+    private readonly nights: NightRepository,
     private readonly uow: UnitOfWork,
   ) {}
 
@@ -83,12 +107,15 @@ export class ConfirmPlanilla
       }
 
       // Reintento idempotente: ya confirmada (visible ahora por el lock) →
-      // estado actual, sin mutar ni auditar.
+      // estado actual, sin mutar ni auditar. El servidor sigue siendo autoridad
+      // del total por rubro (SVC2-64): se recalculan los rubroTotals actuales.
       if (planilla.confirmedAt !== null) {
+        const retryVotes = await tx.votes.findByPlanilla(planilla.id);
         return {
           planilla: toSharedPlanilla(planilla),
           votesConfirmed: 0,
           omissionsInserted: 0,
+          rubroTotals: computeRubroTotals(retryVotes),
         };
       }
 
@@ -98,6 +125,15 @@ export class ConfirmPlanilla
           "PLANILLA_NOT_EDITABLE",
         );
       }
+
+      // Ventana de votación: último gate antes de confirmar. El servidor es la
+      // autoridad temporal (reloj del servidor); sin fechas oficiales
+      // (startsAt/endsAt undefined) no hay ventana que aplicar.
+      const night = await this.nights.findById(planilla.nightId);
+      if (night === null) {
+        throw new NotFoundError("Night");
+      }
+      assertNightWindowOpen(night, new Date());
 
       // Asignación efectiva: define los candidatos de la especialidad que el
       // juez debía evaluar en la noche de la planilla (§6).
@@ -193,6 +229,14 @@ export class ConfirmPlanilla
         });
       }
 
+      // SVC2-64: el servidor es autoridad del total por rubro. Se agrupan TODOS
+      // los votos de la planilla tras la subsanación (los confirmados + los
+      // OMISSION_CORRECTION insertados), se suman sus scores y se ordena por
+      // rubroId. Bookkeeping de valores ya materializados: no duplica lógica
+      // de scoring-engine.
+      const finalVotes = await tx.votes.findByPlanilla(planilla.id);
+      const rubroTotals = computeRubroTotals(finalVotes);
+
       // Transición de la planilla a CONFIRMADA (§21) + auditoría.
       if (votesConfirmed > 0 || omissionsInserted > 0) {
         await tx.planillas.confirm(planilla.id, confirmedAt);
@@ -218,6 +262,7 @@ export class ConfirmPlanilla
         }),
         votesConfirmed,
         omissionsInserted,
+        rubroTotals,
       };
     });
   }
