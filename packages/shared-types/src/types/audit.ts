@@ -2,6 +2,7 @@ import type { DeviceContext } from "./vote.js";
 
 export type AuditEventType =
   | "LOGIN"
+  | "ACCESS_TOKEN_ISSUED"
   | "JURY_ASSIGNED"
   | "JURY_REPLACED"
   | "PLANILLA_CREATED"

@@ -132,6 +132,7 @@ function toUserRow(user: UserAccount): Record<string, unknown> {
     email: user.email,
     display_name: user.displayName ?? null,
     role: user.role,
+    dni: user.dni ?? null,
     password_hash: user.passwordHash ?? null,
   };
 }

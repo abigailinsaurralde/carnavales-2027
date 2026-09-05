@@ -1,7 +1,9 @@
 import { handleGetConfigurationVersion } from "./configuration.js";
 import {
   handleGetSessionUser,
+  handleIssueAccessToken,
   handleLogin,
+  handleLoginWithAccessToken,
   handleLogout,
 } from "./auth.js";
 import { handleGetEdition } from "./edition.js";
@@ -31,6 +33,12 @@ export function createRoutes(): readonly Route[] {
       handler: handleGetConfigurationVersion,
     },
     { method: "POST", path: "/auth/login", handler: handleLogin },
+    { method: "POST", path: "/auth/access-token", handler: handleIssueAccessToken },
+    {
+      method: "POST",
+      path: "/auth/access-token/login",
+      handler: handleLoginWithAccessToken,
+    },
     { method: "POST", path: "/auth/logout", handler: handleLogout },
     { method: "GET", path: "/auth/me", handler: handleGetSessionUser },
     { method: "GET", path: "/judge/context", handler: handleGetJudgeContext },

@@ -11,6 +11,9 @@ import type { AppViewState, DetailView, PlanillaCard } from "../app/app.js";
 
 export interface ScreenActions {
   login(email: string, password: string): void;
+  requestAccessToken(email: string, dni: string): void;
+  loginWithAccessToken(email: string, dni: string, token: string): void;
+  setLoginMode(mode: "judge" | "operator"): void;
   logout(): void;
   openPlanilla(planillaId: string): void;
   createPlanilla(nightId: string): void;
@@ -140,53 +143,180 @@ function renderNotice(state: AppViewState): Child[] {
 }
 
 // ---- Login ----
+//
+// Acceso del juez (SVC2-31): correo + DNI + código temporal de un solo uso.
+//   Paso 1 (identify): correo + DNI → "Pedir código de acceso" (emisión).
+//   Paso 2 (awaiting-token): código temporal → "Entrar" (canje por sesión).
+// El acceso por contraseña se conserva para roles operativos (operator).
 
 function renderLogin(state: AppViewState, actions: ScreenActions): Child[] {
+  if (state.login.mode === "operator") {
+    return renderOperatorLogin(state, actions);
+  }
+  if (state.login.judgeStep === "awaiting-token") {
+    return renderTokenStep(state, actions);
+  }
+  return renderIdentifyStep(state, actions);
+}
+
+function loginCard(children: Child[]): Child[] {
+  return [
+    h("section", { className: "screen login" }, [
+      h("div", { className: "login-card" }, [
+        h("h1", { className: "login-title" }, "Votación de Carnavales"),
+        h("p", { className: "login-sub muted" }, "Comparsas de Goya, edición 2027"),
+        ...children,
+      ]),
+    ]),
+  ];
+}
+
+/** Paso 1 del acceso del juez: identificación (correo + DNI). */
+function renderIdentifyStep(
+  state: AppViewState,
+  actions: ScreenActions,
+): Child[] {
+  let email = "";
+  let dni = "";
+  const onEmail = (e: Event): void => {
+    email = (e.target as HTMLInputElement).value;
+  };
+  const onDni = (e: Event): void => {
+    dni = (e.target as HTMLInputElement).value;
+  };
+  const submit = (e: SubmitEvent): void => {
+    e.preventDefault();
+    if (email === "" || dni === "") return;
+    actions.requestAccessToken(email, dni);
+  };
+  return loginCard([
+    h("form", { className: "login-form", onSubmit: submit }, [
+      h("label", { className: "field" }, [
+        h("span", { className: "field-label" }, "Email"),
+        h("input", {
+          type: "email",
+          autocomplete: "email",
+          inputmode: "email",
+          placeholder: "tumail@ejemplo.com",
+          onInput: onEmail,
+        }),
+      ]),
+      h("label", { className: "field" }, [
+        h("span", { className: "field-label" }, "DNI"),
+        h("input", {
+          type: "text",
+          inputmode: "numeric",
+          autocomplete: "off",
+          placeholder: "Número de documento",
+          onInput: onDni,
+        }),
+      ]),
+      h("button", { type: "submit", className: "btn btn-primary btn-block" },
+        "Pedir código de acceso"),
+    ]),
+    h("div", { className: "login-alt" }, [
+      h("button", {
+        className: "btn btn-ghost btn-block",
+        onClick: () => actions.setLoginMode("operator"),
+      }, "Acceso operativo con contraseña"),
+    ]),
+  ]);
+}
+
+/** Paso 2 del acceso del juez: canje del código temporal por sesión. */
+function renderTokenStep(
+  state: AppViewState,
+  actions: ScreenActions,
+): Child[] {
+  let token = "";
+  const onToken = (e: Event): void => {
+    token = (e.target as HTMLInputElement).value;
+  };
+  const email = state.login.judgeEmail;
+  const dni = state.login.judgeDni;
+  const submit = (e: SubmitEvent): void => {
+    e.preventDefault();
+    if (token === "") return;
+    actions.loginWithAccessToken(email, dni, token);
+  };
+  return loginCard([
+    h("p", { className: "login-sub muted" }, [
+      "Código de acceso emitido. Ingresá el código que te entrega la mesa de votación.",
+    ]),
+    h("p", { className: "login-identity muted" }, `${email} · DNI ${dni}`),
+    h("form", { className: "login-form", onSubmit: submit }, [
+      h("label", { className: "field" }, [
+        h("span", { className: "field-label" }, "Código de acceso"),
+        h("input", {
+          type: "text",
+          autocomplete: "one-time-code",
+          placeholder: "Código de un solo uso",
+          onInput: onToken,
+        }),
+      ]),
+      h("button", { type: "submit", className: "btn btn-primary btn-block" }, "Entrar"),
+    ]),
+    h("div", { className: "login-alt" }, [
+      h("button", {
+        className: "btn btn-ghost btn-block",
+        onClick: () => actions.setLoginMode("judge"),
+      }, "Pedir otro código"),
+      h("button", {
+        className: "btn btn-ghost btn-block",
+        onClick: () => actions.setLoginMode("operator"),
+      }, "Acceso operativo con contraseña"),
+    ]),
+  ]);
+}
+
+/** Acceso por contraseña, conservado para roles operativos. */
+function renderOperatorLogin(
+  _state: AppViewState,
+  actions: ScreenActions,
+): Child[] {
   let email = "";
   let password = "";
   const onEmail = (e: Event): void => {
-    const v = (e.target as HTMLInputElement).value;
-    email = v;
+    email = (e.target as HTMLInputElement).value;
   };
   const onPassword = (e: Event): void => {
-    const v = (e.target as HTMLInputElement).value;
-    password = v;
+    password = (e.target as HTMLInputElement).value;
   };
   const submit = (e: SubmitEvent): void => {
     e.preventDefault();
     if (email === "" || password === "") return;
     actions.login(email, password);
   };
-  return [
-    h("section", { className: "screen login" }, [
-      h("div", { className: "login-card" }, [
-        h("h1", { className: "login-title" }, "Votación de Carnavales"),
-        h("p", { className: "login-sub muted" }, "Comparsas de Goya, edición 2027"),
-        h("form", { className: "login-form", onSubmit: submit }, [
-          h("label", { className: "field" }, [
-            h("span", { className: "field-label" }, "Email"),
-            h("input", {
-              type: "email",
-              autocomplete: "email",
-              inputmode: "email",
-              placeholder: "tumail@ejemplo.com",
-              onInput: onEmail,
-            }),
-          ]),
-          h("label", { className: "field" }, [
-            h("span", { className: "field-label" }, "Contraseña"),
-            h("input", {
-              type: "password",
-              autocomplete: "current-password",
-              placeholder: "••••••••",
-              onInput: onPassword,
-            }),
-          ]),
-          h("button", { type: "submit", className: "btn btn-primary btn-block" }, "Entrar"),
-        ]),
+  return loginCard([
+    h("form", { className: "login-form", onSubmit: submit }, [
+      h("label", { className: "field" }, [
+        h("span", { className: "field-label" }, "Email"),
+        h("input", {
+          type: "email",
+          autocomplete: "email",
+          inputmode: "email",
+          placeholder: "tumail@ejemplo.com",
+          onInput: onEmail,
+        }),
       ]),
+      h("label", { className: "field" }, [
+        h("span", { className: "field-label" }, "Contraseña"),
+        h("input", {
+          type: "password",
+          autocomplete: "current-password",
+          placeholder: "••••••••",
+          onInput: onPassword,
+        }),
+      ]),
+      h("button", { type: "submit", className: "btn btn-primary btn-block" }, "Entrar"),
     ]),
-  ];
+    h("div", { className: "login-alt" }, [
+      h("button", {
+        className: "btn btn-ghost btn-block",
+        onClick: () => actions.setLoginMode("judge"),
+      }, "Volver al acceso con código"),
+    ]),
+  ]);
 }
 
 // ---- Home ----

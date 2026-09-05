@@ -2,6 +2,8 @@ export * from "./get-edition.js";
 export * from "./get-night.js";
 export * from "./get-configuration-version.js";
 export * from "./login.js";
+export * from "./issue-access-token.js";
+export * from "./login-with-access-token.js";
 export * from "./logout.js";
 export * from "./get-session-user.js";
 export * from "./judge-context.js";

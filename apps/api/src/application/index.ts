@@ -1,3 +1,4 @@
+import type { AccessTokenRepository } from "../domain/repositories/access-token-repository.js";
 import type { AuditRepository } from "../domain/repositories/audit-repository.js";
 import type { CatalogueRepository } from "../domain/repositories/catalogue-repository.js";
 import type { ConfigurationRepository } from "../domain/repositories/configuration-repository.js";
@@ -19,8 +20,10 @@ import {
   GetPlanilla,
   GetSessionUser,
   JudgeContext,
+  IssueAccessToken,
   ListMyPlanillas,
   Login,
+  LoginWithAccessToken,
   Logout,
   SyncPlanillas,
   UpsertVote,
@@ -33,6 +36,8 @@ export interface Application {
   login: Login;
   logout: Logout;
   getSessionUser: GetSessionUser;
+  issueAccessToken: IssueAccessToken;
+  loginWithAccessToken: LoginWithAccessToken;
   judgeContext: JudgeContext;
   listMyPlanillas: ListMyPlanillas;
   createPlanilla: CreatePlanilla;
@@ -48,6 +53,7 @@ export interface Repositories {
   configurations: ConfigurationRepository;
   users: UserRepository;
   sessions: SessionRepository;
+  accessTokens: AccessTokenRepository;
   planillas: PlanillaRepository;
   votes: VoteRepository;
   assignments: JudgeAssignmentRepository;
@@ -77,6 +83,18 @@ export function createApplication(
     login: new Login(repos.users, repos.sessions, options.sessionTtlHours),
     logout: new Logout(repos.sessions),
     getSessionUser: new GetSessionUser(repos.users, repos.sessions),
+    issueAccessToken: new IssueAccessToken(
+      repos.users,
+      repos.accessTokens,
+      repos.audits,
+    ),
+    loginWithAccessToken: new LoginWithAccessToken(
+      repos.users,
+      repos.accessTokens,
+      repos.sessions,
+      repos.audits,
+      options.sessionTtlHours,
+    ),
     judgeContext: new JudgeContext(
       repos.editions,
       repos.nights,

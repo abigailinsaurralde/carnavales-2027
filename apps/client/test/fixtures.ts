@@ -3,6 +3,7 @@ import type {
   AuthSession,
   Candidate,
   Comparsa,
+  IssueAccessTokenResponse,
   JudgeAssignmentContext,
   JudgeContextResponse,
   Night,
@@ -80,11 +81,15 @@ export function makeContext(): JudgeContextResponse {
   };
 }
 
+/** DNI de persona física del juez (SVC2-24), identificador del acceso SVC2-31. */
+export const JUDGE_DNI = "30123456";
+
 export const JUDGE_USER: AuthenticatedUser = {
   id: "juez-1",
   email: "juez.baile.1@goya2027.test",
   displayName: "Juez de Baile",
   role: "JUDGE",
+  dni: JUDGE_DNI,
 };
 
 export const JUDGE_SESSION: AuthSession = {
@@ -95,3 +100,32 @@ export const JUDGE_SESSION: AuthSession = {
 
 export const JUDGE_EMAIL = JUDGE_USER.email;
 export const JUDGE_PASSWORD = "ChangeMe-2027!";
+
+/**
+ * Access token temporal de un solo uso (SVC2-31). En producción lo genera el
+ * servidor y se entrega fuera de banda (mesa de votación); el fixture fija un
+ * valor estable para los tests del flujo de acceso.
+ */
+export const JUDGE_ACCESS_TOKEN = "a3f0c2e9d8b74a1e6c5f0d9b8a7e6c5f";
+
+export const ACCESS_TOKEN_ISSUE: IssueAccessTokenResponse = {
+  token: JUDGE_ACCESS_TOKEN,
+  expiresAt: "2030-01-01T00:00:00.000Z",
+};
+
+/** Sesión operativa (acceso por contraseña conservado para roles operativos). */
+export const OPERATOR_USER: AuthenticatedUser = {
+  id: "escribano-1",
+  email: "escribano@goya2027.test",
+  displayName: "Escribano/Veedor",
+  role: "ESCRIBANO_VEEDOR",
+};
+
+export const OPERATOR_SESSION: AuthSession = {
+  token: "token-escribano-1",
+  expiresAt: "2030-01-01T00:00:00.000Z",
+  user: OPERATOR_USER,
+};
+
+export const OPERATOR_EMAIL = OPERATOR_USER.email;
+export const OPERATOR_PASSWORD = "ChangeMe-2027!";

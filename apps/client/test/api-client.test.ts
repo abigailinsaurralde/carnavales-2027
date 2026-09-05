@@ -114,6 +114,73 @@ describe("ApiClient", () => {
     await api.me();
     expect(requests[1]!.init.headers).toMatchObject({ authorization: "Bearer tok-b" });
   });
+
+  it("issueAccessToken emite vía POST /auth/access-token", async () => {
+    const { api, requests } = makeClient({
+      fetchFn: async () =>
+        json(200, { token: "abc123", expiresAt: "2030-01-01T00:00:00.000Z" }),
+    });
+    const result = await api.issueAccessToken({
+      email: "juez@goya.test",
+      dni: "30123456",
+    });
+    expect(result.ok).toBe(true);
+    expect(requests[0]!.url).toBe("http://test/auth/access-token");
+    expect(requests[0]!.init.method).toBe("POST");
+    expect(JSON.parse(String(requests[0]!.init.body))).toEqual({
+      email: "juez@goya.test",
+      dni: "30123456",
+    });
+    if (result.ok) expect(result.data.token).toBe("abc123");
+  });
+
+  it("issueAccessToken normaliza un 401 de credenciales como UNAUTHORIZED", async () => {
+    const { api } = makeClient({
+      fetchFn: async () =>
+        json(401, { error: { code: "INVALID_CREDENTIALS", message: "Bad" } }),
+    });
+    const result = await api.issueAccessToken({
+      email: "a@b.c",
+      dni: "30123456",
+    });
+    expect(result).toMatchObject({ ok: false, kind: "UNAUTHORIZED", status: 401 });
+  });
+
+  it("loginWithAccessToken canjea vía POST /auth/access-token/login", async () => {
+    const session = {
+      token: "ses-1",
+      expiresAt: "2030-01-01T00:00:00.000Z",
+      user: { id: "juez-1", email: "juez@goya.test", role: "JUDGE", dni: "30123456" },
+    };
+    const { api, requests } = makeClient({ fetchFn: async () => json(200, session) });
+    const result = await api.loginWithAccessToken({
+      email: "juez@goya.test",
+      dni: "30123456",
+      token: "abc123",
+    });
+    expect(requests[0]!.url).toBe("http://test/auth/access-token/login");
+    expect(requests[0]!.init.method).toBe("POST");
+    expect(JSON.parse(String(requests[0]!.init.body))).toEqual({
+      email: "juez@goya.test",
+      dni: "30123456",
+      token: "abc123",
+    });
+    if (result.ok) expect(result.data).toEqual(session);
+  });
+
+  it("loginWithAccessToken clasifica un fallo de red como NETWORK", async () => {
+    const { api } = makeClient({
+      fetchFn: async () => {
+        throw new TypeError("fetch failed");
+      },
+    });
+    const result = await api.loginWithAccessToken({
+      email: "a@b.c",
+      dni: "30123456",
+      token: "x",
+    });
+    expect(result).toMatchObject({ ok: false, kind: "NETWORK" });
+  });
 });
 
 describe("errorCode", () => {

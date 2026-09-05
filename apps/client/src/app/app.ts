@@ -46,6 +46,29 @@ export interface PlanillaCard {
   creationPending: boolean;
 }
 
+/**
+ * Estado de la pantalla de acceso.
+ *
+ * - `mode === "judge"` es el acceso principal del PMV: correo + DNI + código
+ *   temporal de un solo uso (SVC2-31). El paso 1 pide el código (`identify`);
+ *   el paso 2 lo canjea por una sesión (`awaiting-token`).
+ * - `mode === "operator"` conserva el acceso por contraseña para roles
+ *   operativos (ADMIN / ESCRIBANO_VEEDOR).
+ *
+ * El email y el DNI del paso 1 se conservan en memoria para el canje; el
+ * código temporal (token de acceso) NUNCA se persiste ni se muestra en la UI.
+ */
+export interface LoginView {
+  mode: "judge" | "operator";
+  judgeStep: "identify" | "awaiting-token";
+  judgeEmail: string;
+  judgeDni: string;
+}
+
+function defaultLoginView(): LoginView {
+  return { mode: "judge", judgeStep: "identify", judgeEmail: "", judgeDni: "" };
+}
+
 export interface DetailView {
   planillaId: string;
   nightNumber: number;
@@ -71,6 +94,7 @@ export interface AppViewState {
   planillas: PlanillaCard[];
   detail: DetailView | null;
   notice: { text: string; tone: "info" | "success" | "error" } | null;
+  login: LoginView;
 }
 
 export interface AppServices {
@@ -113,6 +137,7 @@ export class JudgeApp {
     planillas: [],
     detail: null,
     notice: null,
+    login: defaultLoginView(),
   };
 
   constructor(services: AppServices) {
@@ -188,6 +213,70 @@ export class JudgeApp {
     this.emit();
   }
 
+  /**
+   * Paso 1 del acceso del juez: pide la emisión del código temporal
+   * (correo + DNI). El token plano devuelto por el servidor es el punto de
+   * entrega fuera de banda (mesa de votación): NO se conserva, NO se persiste
+   * y NO se expone en la pantalla; solo se confirma la emisión.
+   */
+  async requestAccessToken(email: string, dni: string): Promise<void> {
+    const result = await this.services.api.issueAccessToken({ email, dni });
+    if (!result.ok) {
+      this.showAccessTokenIssueError(result);
+      return;
+    }
+    this.state.login = {
+      mode: "judge",
+      judgeStep: "awaiting-token",
+      judgeEmail: email,
+      judgeDni: dni,
+    };
+    this.setNotice(
+      "Código de acceso emitido. Te lo entrega la mesa de votación.",
+      "success",
+    );
+  }
+
+  /** Paso 2 del acceso del juez: canjea el código temporal por una sesión. */
+  async loginWithAccessToken(
+    email: string,
+    dni: string,
+    token: string,
+  ): Promise<void> {
+    const result = await this.services.api.loginWithAccessToken({
+      email,
+      dni,
+      token,
+    });
+    if (!result.ok) {
+      this.showAccessTokenExchangeError(result);
+      return;
+    }
+    this.services.session.set(result.data.token, result.data.user);
+    this.resetLoginView();
+    this.services.router.navigate({ name: "home" });
+    this.emit();
+  }
+
+  /**
+   * Cambia entre el acceso del juez (código temporal) y el acceso operativo
+   * (contraseña). Al volver al modo juez se reinicia al paso 1 (identificación)
+   * para permitir pedir un código nuevo.
+   */
+  setLoginMode(mode: "judge" | "operator"): void {
+    this.state.login = {
+      mode,
+      judgeStep: "identify",
+      judgeEmail: "",
+      judgeDni: "",
+    };
+    this.emit();
+  }
+
+  private resetLoginView(): void {
+    this.state.login = defaultLoginView();
+  }
+
   async logout(): Promise<void> {
     const token = this.services.session.getToken();
     if (token !== null) {
@@ -197,6 +286,7 @@ export class JudgeApp {
     this.state.context = null;
     this.state.planillas = [];
     this.state.detail = null;
+    this.resetLoginView();
     this.services.router.navigate({ name: "login" });
     this.emit();
   }
@@ -685,23 +775,62 @@ export class JudgeApp {
 
   // ---- Utilidades ----
 
+  /**
+   * Maneja los fallos de transporte comunes a todos los flujos de acceso.
+   * Devuelve true si el error ya fue mostrado (red/timeout).
+   */
+  private showAuthTransportError(result: ApiResult<unknown>): boolean {
+    if (result.ok) return false;
+    if (result.kind === "NETWORK") {
+      this.setNotice("Sin conexión. Revisá tu conexión e intentá de nuevo.", "error");
+      return true;
+    }
+    if (result.kind === "TIMEOUT") {
+      this.setNotice("El servidor no respondió. Intentá de nuevo.", "error");
+      return true;
+    }
+    return false;
+  }
+
   private showLoginError(result: ApiResult<unknown>): void {
     if (result.ok) return;
-    const { kind } = result;
+    if (this.showAuthTransportError(result)) return;
     const code = errorCode(result.body);
-    if (kind === "NETWORK") {
-      this.setNotice("Sin conexión. Revisá tu conexión e intentá de nuevo.", "error");
-      return;
-    }
-    if (kind === "TIMEOUT") {
-      this.setNotice("El servidor no respondió. Intentá de nuevo.", "error");
-      return;
-    }
     if (code === "INVALID_CREDENTIALS") {
       this.setNotice("Email o contraseña incorrectos.", "error");
       return;
     }
-    this.setNotice(friendlyError(kind, result.body), "error");
+    this.setNotice(friendlyError(result.kind, result.body), "error");
+  }
+
+  /** Errores de la emisión del código temporal (correo + DNI). */
+  private showAccessTokenIssueError(result: ApiResult<unknown>): void {
+    if (result.ok) return;
+    if (this.showAuthTransportError(result)) return;
+    const code = errorCode(result.body);
+    if (code === "INVALID_CREDENTIALS") {
+      this.setNotice(
+        "No se encontró un juez con ese correo y DNI. Revisá los datos.",
+        "error",
+      );
+      return;
+    }
+    this.setNotice(friendlyError(result.kind, result.body), "error");
+  }
+
+  /** Errores del canje del código temporal por sesión. */
+  private showAccessTokenExchangeError(result: ApiResult<unknown>): void {
+    if (result.ok) return;
+    if (this.showAuthTransportError(result)) return;
+    const code = errorCode(result.body);
+    if (code === "INVALID_CREDENTIALS") {
+      this.setNotice(
+        "El código no es válido, venció o ya fue usado. Pedí un código nuevo.",
+        "error",
+      );
+      return;
+    }
+    this.setNotice(friendlyError(result.kind, result.body), "error");
   }
 
   setNotice(text: string, tone: "info" | "success" | "error"): void {
@@ -714,6 +843,7 @@ export class JudgeApp {
     this.state.context = null;
     this.state.planillas = [];
     this.state.detail = null;
+    this.resetLoginView();
     this.services.router.navigate({ name: "login" });
     this.emit();
   }
@@ -730,6 +860,7 @@ export class JudgeApp {
       }
     } else if (route.name === "login") {
       this.state.detail = null;
+      this.resetLoginView();
     }
     this.emit();
   }

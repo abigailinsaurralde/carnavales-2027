@@ -2,8 +2,11 @@ import type {
   AuthenticatedUser,
   AuthSession,
   ConfirmPlanillaResult,
+  IssueAccessTokenRequest,
+  IssueAccessTokenResponse,
   JudgeContextResponse,
   LoginRequest,
+  LoginWithAccessTokenRequest,
   PlanillaDetail,
   PlanillaSummary,
   VoteUpsertPayload,
@@ -68,9 +71,33 @@ export class ApiClient {
       options.fetchFn ?? ((url: string, init: RequestInit) => fetch(url, init));
   }
 
-  /** POST /auth/login */
+  /** POST /auth/login — roles operativos (ADMIN / ESCRIBANO_VEEDOR). */
   async login(request: LoginRequest): Promise<ApiResult<AuthSession>> {
     return this.send("POST", "/auth/login", { body: request });
+  }
+
+  /**
+   * POST /auth/access-token — emisión del access token temporal de un solo
+   * uso para el acceso del juez (correo + DNI).
+   *
+   * REGLA DE SEGURIDAD: el token plano que devuelve esta respuesta se entrega
+   * UNA única vez (fuera de banda, mesa de votación). El cliente NO debe
+   * persistirlo ni exponerlo en la UI.
+   */
+  async issueAccessToken(
+    request: IssueAccessTokenRequest,
+  ): Promise<ApiResult<IssueAccessTokenResponse>> {
+    return this.send("POST", "/auth/access-token", { body: request });
+  }
+
+  /**
+   * POST /auth/access-token/login — canje del access token temporal por una
+   * sesión server-side estándar. Respuesta idéntica a POST /auth/login.
+   */
+  async loginWithAccessToken(
+    request: LoginWithAccessTokenRequest,
+  ): Promise<ApiResult<AuthSession>> {
+    return this.send("POST", "/auth/access-token/login", { body: request });
   }
 
   /** POST /auth/logout — no exige sesión válida para cerrar la sesión local. */

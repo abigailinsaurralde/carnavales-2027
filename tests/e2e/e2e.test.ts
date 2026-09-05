@@ -33,6 +33,7 @@ import { createApplication, type Repositories } from "../../apps/api/src/applica
 import type { DbPool } from "../../apps/api/src/db/pool.js";
 import type { UnitOfWork, UnitOfWorkRepositories } from "../../apps/api/src/domain/repositories/unit-of-work.js";
 import { PostgresAuditRepository } from "../../apps/api/src/infrastructure/repositories/postgres-audit-repository.js";
+import { PostgresAccessTokenRepository } from "../../apps/api/src/infrastructure/repositories/postgres-access-token-repository.js";
 import { PostgresCatalogueRepository } from "../../apps/api/src/infrastructure/repositories/postgres-catalogue-repository.js";
 import { PostgresConfigurationRepository } from "../../apps/api/src/infrastructure/repositories/postgres-configuration-repository.js";
 import { PostgresEditionRepository } from "../../apps/api/src/infrastructure/repositories/postgres-edition-repository.js";
@@ -105,6 +106,7 @@ function buildRepos(db: DbPool, uow: UnitOfWork): Repositories {
     configurations: new PostgresConfigurationRepository(db),
     users: new PostgresUserRepository(db),
     sessions: new PostgresSessionRepository(db),
+    accessTokens: new PostgresAccessTokenRepository(db),
     planillas: new PostgresPlanillaRepository(db),
     votes: new PostgresVoteRepository(db),
     assignments: new PostgresJudgeAssignmentRepository(db),

@@ -3,6 +3,7 @@ export * from "./postgres-night-repository.js";
 export * from "./postgres-configuration-repository.js";
 export * from "./postgres-user-repository.js";
 export * from "./postgres-session-repository.js";
+export * from "./postgres-access-token-repository.js";
 export * from "./postgres-planilla-repository.js";
 export * from "./postgres-vote-repository.js";
 export * from "./postgres-judge-assignment-repository.js";

@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  ACCESS_TOKEN_ISSUE,
+  JUDGE_ACCESS_TOKEN,
+  JUDGE_DNI,
   JUDGE_EMAIL,
-  JUDGE_PASSWORD,
   JUDGE_SESSION,
   makeContext,
   NIGHT_ID,
+  OPERATOR_EMAIL,
+  OPERATOR_PASSWORD,
+  OPERATOR_SESSION,
 } from "./fixtures.js";
 import type {
   ConfirmPlanillaResult,
@@ -33,6 +38,8 @@ interface StubServer {
   context: JudgeContextResponse;
   details: Map<string, { planilla: Planilla; votes: Vote[] }>;
   loginFails: boolean;
+  issueFails: boolean;
+  exchangeFails: boolean;
 }
 
 function makeRouter(initial: Route): Router {
@@ -67,6 +74,18 @@ function serverFetch(server: StubServer) {
 
     if (path === "/auth/login") {
       if (server.loginFails) {
+        return json(401, { error: { code: "INVALID_CREDENTIALS", message: "Bad" } });
+      }
+      return json(200, OPERATOR_SESSION);
+    }
+    if (path === "/auth/access-token" && method === "POST") {
+      if (server.issueFails) {
+        return json(401, { error: { code: "INVALID_CREDENTIALS", message: "Bad" } });
+      }
+      return json(200, ACCESS_TOKEN_ISSUE);
+    }
+    if (path === "/auth/access-token/login" && method === "POST") {
+      if (server.exchangeFails) {
         return json(401, { error: { code: "INVALID_CREDENTIALS", message: "Bad" } });
       }
       return json(200, JUDGE_SESSION);
@@ -169,7 +188,12 @@ interface Harness {
   planillaIds: string[];
 }
 
-function makeHarness(options?: { loginFails?: boolean; initialOnline?: boolean }): Harness {
+function makeHarness(options?: {
+  loginFails?: boolean;
+  issueFails?: boolean;
+  exchangeFails?: boolean;
+  initialOnline?: boolean;
+}): Harness {
   const kv = new MemoryStorage();
   const store = new OfflineStore(kv);
   const connectivity = createManualConnectivity(options?.initialOnline ?? true);
@@ -179,6 +203,8 @@ function makeHarness(options?: { loginFails?: boolean; initialOnline?: boolean }
     context: makeContext(),
     details: new Map(),
     loginFails: options?.loginFails ?? false,
+    issueFails: options?.issueFails ?? false,
+    exchangeFails: options?.exchangeFails ?? false,
   };
 
   const api = new ApiClient({
@@ -254,6 +280,21 @@ function flush(ms = 0): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** Acceso del juez por SVC2-31: emisión del código + canje por sesión. */
+async function loginAsJudge(h: Harness): Promise<void> {
+  await h.app.requestAccessToken(JUDGE_EMAIL, JUDGE_DNI);
+  await h.app.loginWithAccessToken(JUDGE_EMAIL, JUDGE_DNI, JUDGE_ACCESS_TOKEN);
+  await flush();
+  await flush(20);
+}
+
+/** Crea la primera planilla estando sin conexión (queda pendiente). */
+async function createLocalPlanilla(h: Harness): Promise<void> {
+  h.connectivity.setOnline(false);
+  await h.app.createPlanilla(NIGHT_ID);
+  await flush();
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -266,9 +307,7 @@ describe("flujo del juez (login → notas → sync → confirmación)", () => {
     await app.boot();
     expect(app.getState().user).toBeNull();
 
-    await app.login(JUDGE_EMAIL, JUDGE_PASSWORD);
-    await flush();
-    await flush(20);
+    await loginAsJudge(h);
     expect(app.getState().user?.role).toBe("JUDGE");
     expect(app.getState().context).not.toBeNull();
     await flush();
@@ -277,10 +316,8 @@ describe("flujo del juez (login → notas → sync → confirmación)", () => {
     expect(app.getState().planillas[0]!.planillaId).toBe("");
 
     // Sin conexión: crear la planilla queda pendiente (sin drenado automático).
-    h.connectivity.setOnline(false);
-    await app.createPlanilla(NIGHT_ID);
+    await createLocalPlanilla(h);
     const planillaId = h.planillaIds[0]!;
-    await flush();
 
     let detail = app.getState().detail;
     expect(detail).not.toBeNull();
@@ -340,11 +377,8 @@ describe("flujo del juez (login → notas → sync → confirmación)", () => {
     const h = makeHarness({ initialOnline: false });
     const app = h.app;
     await app.boot();
-    await app.login(JUDGE_EMAIL, JUDGE_PASSWORD);
-    await flush();
-    await flush(20);
-
-    await app.createPlanilla(NIGHT_ID);
+    await loginAsJudge(h);
+    await createLocalPlanilla(h);
     const planillaId = h.planillaIds[0]!;
     await app.setScore(
       planillaId,
@@ -359,14 +393,64 @@ describe("flujo del juez (login → notas → sync → confirmación)", () => {
     ).toBe(true);
   });
 
-  it("muestra un mensaje accionable ante credenciales inválidas", async () => {
+  it("canje con código inválido muestra un mensaje accionable", async () => {
+    const h = makeHarness({ exchangeFails: true });
+    const app = h.app;
+    await app.boot();
+    await app.requestAccessToken(JUDGE_EMAIL, JUDGE_DNI);
+    await app.loginWithAccessToken(JUDGE_EMAIL, JUDGE_DNI, JUDGE_ACCESS_TOKEN);
+    expect(app.getState().user).toBeNull();
+    expect(app.getState().notice?.tone).toBe("error");
+    expect(app.getState().notice?.text).toContain("código");
+  });
+
+  it("emisión con datos desconocidos muestra un mensaje accionable", async () => {
+    const h = makeHarness({ issueFails: true });
+    const app = h.app;
+    await app.boot();
+    await app.requestAccessToken(JUDGE_EMAIL, JUDGE_DNI);
+    expect(app.getState().user).toBeNull();
+    expect(app.getState().login.judgeStep).toBe("identify");
+    expect(app.getState().notice?.tone).toBe("error");
+    expect(app.getState().notice?.text).toContain("juez");
+  });
+
+  it("conserva el acceso operativo por contraseña", async () => {
+    const h = makeHarness();
+    const app = h.app;
+    await app.boot();
+    await app.login(OPERATOR_EMAIL, OPERATOR_PASSWORD);
+    await flush();
+    await flush(20);
+    expect(app.getState().user?.role).toBe("ESCRIBANO_VEEDOR");
+    expect(app.getState().user?.email).toBe(OPERATOR_EMAIL);
+  });
+
+  it("fallo del acceso por contraseña mantiene el mensaje de credenciales", async () => {
     const h = makeHarness({ loginFails: true });
     const app = h.app;
     await app.boot();
-    await app.login(JUDGE_EMAIL, JUDGE_PASSWORD);
+    await app.login(OPERATOR_EMAIL, OPERATOR_PASSWORD);
     expect(app.getState().user).toBeNull();
     expect(app.getState().notice?.tone).toBe("error");
     expect(app.getState().notice?.text).toContain("incorrectos");
+  });
+
+  it("la emisión del código confirma la entrega sin persistir el token plano", async () => {
+    const h = makeHarness();
+    const app = h.app;
+    await app.boot();
+    await app.requestAccessToken(JUDGE_EMAIL, JUDGE_DNI);
+    const state = app.getState();
+    expect(state.login.judgeStep).toBe("awaiting-token");
+    expect(state.login.judgeEmail).toBe(JUDGE_EMAIL);
+    expect(state.login.judgeDni).toBe(JUDGE_DNI);
+    expect(state.notice?.tone).toBe("success");
+    expect(state.user).toBeNull();
+    expect(h.session.getToken()).toBeNull();
+    // El token plano del access token no aparece en la persistencia local.
+    const persisted = h.kv.list("").map((k) => h.kv.get(k) ?? "");
+    expect(persisted.some((v) => v.includes(JUDGE_ACCESS_TOKEN))).toBe(false);
   });
 
   it("cachea el contexto y permite reconstruir la hoja sin red", async () => {
@@ -374,7 +458,13 @@ describe("flujo del juez (login → notas → sync → confirmación)", () => {
     const store = new OfflineStore(kv);
     const connectivity = createManualConnectivity();
     const session = createSessionStore();
-    const server: StubServer = { context: makeContext(), details: new Map(), loginFails: false };
+    const server: StubServer = {
+      context: makeContext(),
+      details: new Map(),
+      loginFails: false,
+      issueFails: false,
+      exchangeFails: false,
+    };
     const router1 = makeRouter({ name: "login" });
     const api1 = new ApiClient({
       baseUrl: "http://test",
@@ -393,13 +483,20 @@ describe("flujo del juez (login → notas → sync → confirmación)", () => {
       createId: () => "id-1",
     });
     await app1.boot();
-    await app1.login(JUDGE_EMAIL, JUDGE_PASSWORD);
+    await app1.requestAccessToken(JUDGE_EMAIL, JUDGE_DNI);
+    await app1.loginWithAccessToken(JUDGE_EMAIL, JUDGE_DNI, JUDGE_ACCESS_TOKEN);
     await flush();
     await flush(20);
     expect(kv.get("cache.context")).toContain("Carnavales Goya");
 
     // Segunda instancia (recarga) sin red: reconstruye la hoja desde la caché.
-    const server2: StubServer = { context: makeContext(), details: new Map(), loginFails: false };
+    const server2: StubServer = {
+      context: makeContext(),
+      details: new Map(),
+      loginFails: false,
+      issueFails: false,
+      exchangeFails: false,
+    };
     const connectivity2 = createManualConnectivity(false);
     const router2 = makeRouter({ name: "login" });
     const app2 = new JudgeApp({

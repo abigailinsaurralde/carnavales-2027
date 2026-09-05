@@ -8,6 +8,11 @@ interface UserRow {
   email: string;
   display_name: string | null;
   role: string;
+  /**
+   * DNI del usuario (migración 004, coordinada con Database). NULL para
+   * cuentas sin identificación de persona física (SVC2-24).
+   */
+  dni: string | null;
   password_hash: string | null;
 }
 
@@ -16,6 +21,7 @@ function mapUser(row: UserRow): UserAccount {
     id: row.id,
     email: row.email,
     ...(row.display_name === null ? {} : { displayName: row.display_name }),
+    ...(row.dni === null ? {} : { dni: row.dni }),
     role: row.role as UserRole,
     ...(row.password_hash === null ? {} : { passwordHash: row.password_hash }),
   };
@@ -26,7 +32,7 @@ export class PostgresUserRepository implements UserRepository {
 
   async findByEmail(email: string): Promise<UserAccount | null> {
     const result = await this.db.query<UserRow>(
-      `SELECT id, email, display_name, role, password_hash
+      `SELECT id, email, display_name, role, dni, password_hash
        FROM user_account
        WHERE email = $1`,
       [email],
@@ -37,7 +43,7 @@ export class PostgresUserRepository implements UserRepository {
 
   async findById(id: string): Promise<UserAccount | null> {
     const result = await this.db.query<UserRow>(
-      `SELECT id, email, display_name, role, password_hash
+      `SELECT id, email, display_name, role, dni, password_hash
        FROM user_account
        WHERE id = $1`,
       [id],

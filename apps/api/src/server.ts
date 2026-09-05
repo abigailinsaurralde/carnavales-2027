@@ -10,6 +10,7 @@ import {
   sendPreflight,
 } from "./http/security.js";
 import { PostgresAuditRepository } from "./infrastructure/repositories/postgres-audit-repository.js";
+import { PostgresAccessTokenRepository } from "./infrastructure/repositories/postgres-access-token-repository.js";
 import { PostgresCatalogueRepository } from "./infrastructure/repositories/postgres-catalogue-repository.js";
 import { PostgresConfigurationRepository } from "./infrastructure/repositories/postgres-configuration-repository.js";
 import { PostgresEditionRepository } from "./infrastructure/repositories/postgres-edition-repository.js";
@@ -38,6 +39,7 @@ export function createApp(config: AppConfig, db: DbPool = createPool(config.data
       configurations: new PostgresConfigurationRepository(db),
       users: new PostgresUserRepository(db),
       sessions: new PostgresSessionRepository(db),
+      accessTokens: new PostgresAccessTokenRepository(db),
       planillas: new PostgresPlanillaRepository(db),
       votes: new PostgresVoteRepository(db),
       assignments: new PostgresJudgeAssignmentRepository(db),

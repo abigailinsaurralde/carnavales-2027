@@ -82,6 +82,10 @@ function main(): void {
   const app = new JudgeApp(services);
   const actions: ScreenActions = {
     login: (email, password) => void app.login(email, password),
+    requestAccessToken: (email, dni) => void app.requestAccessToken(email, dni),
+    loginWithAccessToken: (email, dni, token) =>
+      void app.loginWithAccessToken(email, dni, token),
+    setLoginMode: (mode) => app.setLoginMode(mode),
     logout: () => void app.logout(),
     openPlanilla: (id) => void app.openPlanilla(id),
     createPlanilla: (nightId) => void app.createPlanilla(nightId),

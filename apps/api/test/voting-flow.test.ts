@@ -991,6 +991,7 @@ interface DbUser {
   email: string;
   display_name: string | null;
   role: string;
+  dni: string | null;
   password_hash: string | null;
 }
 
@@ -1124,8 +1125,8 @@ interface DbStore {
 function makeStore(): DbStore {
   return {
     users: [
-      { id: ADMIN_USER_ID, email: "admin@goya2027.test", display_name: "Admin", role: "ADMIN", password_hash: null },
-      { id: JUDGE_ID, email: "juez.baile@goya2027.test", display_name: "Juez de prueba", role: "JUDGE", password_hash: null },
+      { id: ADMIN_USER_ID, email: "admin@goya2027.test", display_name: "Admin", role: "ADMIN", dni: null, password_hash: null },
+      { id: JUDGE_ID, email: "juez.baile@goya2027.test", display_name: "Juez de prueba", role: "JUDGE", dni: null, password_hash: null },
     ],
     sessions: [],
     edition: { id: EDITION_ID, code: EDITION_CODE, name: "Carnavales Goya 2027", voting_nights: 3, starts_on: null, ends_on: null },
