@@ -1,0 +1,19 @@
+{
+  "name": "Votación Carnavales 2027",
+  "short_name": "Votación 2027",
+  "description": "Carga y revisión de notas del jurado — Carnavales de Goya 2027",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0c0f16",
+  "theme_color": "#0c0f16",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

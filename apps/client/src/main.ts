@@ -15,6 +15,7 @@ import { JudgeApp, type AppServices, type SyncSource } from "./app/app.js";
 import { mount } from "./ui/dom.js";
 import { renderApp, type ScreenActions } from "./ui/screens.js";
 import { createRouter } from "./ui/router.js";
+import { registerPwa } from "./pwa/register.js";
 import "./styles.css";
 
 function apiBaseUrl(): string {
@@ -109,6 +110,8 @@ function main(): void {
 
   app.subscribe(() => mount(root, renderApp(app.getState(), actions)));
   void app.boot();
+
+  registerPwa();
 }
 
 main();
