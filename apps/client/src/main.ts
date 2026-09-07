@@ -2,7 +2,7 @@ import {
   createBrowserConnectivity,
   createHttpTransport,
   createId,
-  createLocalStorageAdapter,
+  createIndexedDbAdapter,
   OfflineStore,
   SyncManager,
   systemClock,
@@ -25,11 +25,12 @@ function apiBaseUrl(): string {
   return envBase ?? "/api";
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const root = document.getElementById("app");
   if (root === null) throw new Error("Missing #app element");
 
-  const kv = createLocalStorageAdapter("votaciones2027");
+  const kv = createIndexedDbAdapter("votaciones2027");
+  await kv.ready();
   const session: SessionStore = createSessionStore();
   const store = new OfflineStore(kv);
   const connectivity = createBrowserConnectivity();
@@ -114,4 +115,4 @@ function main(): void {
   registerPwa();
 }
 
-main();
+void main();

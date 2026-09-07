@@ -1,6 +1,7 @@
 export * from "./types.js";
 export * from "./id.js";
 export * from "./storage.js";
+export * from "./idb-adapter.js";
 export * from "./store.js";
 export * from "./clock.js";
 export * from "./backoff.js";
