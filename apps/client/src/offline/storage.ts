@@ -2,9 +2,14 @@
  * Almacenamiento clave-valor simple y síncrono.
  *
  * Abstrae la capa de persistencia local para que el motor offline no dependa
- * directamente de una API de plataforma. El PMV usa localStorage (adaptador
- * incluido); IndexedDB queda como punto de extensión natural de esta interfaz
- * para volúmenes mayores (misma firma `KVStorage`).
+ * directamente de una API de plataforma. Implementaciones reales de
+ * `KVStorage`:
+ *  - `IndexedDbAdapter` (`./idb-adapter.ts`): persistencia sobre IndexedDB,
+ *    la que usa la aplicación en `main.ts` (espejo en memoria + escrituras
+ *    encoladas + hidratación en `ready()`).
+ *  - `createLocalStorageAdapter`: adaptador sobre localStorage, conservado
+ *    como alternativa para entornos donde IndexedDB no esté disponible.
+ *  - `MemoryStorage`: solo en memoria (tests).
  */
 export interface KVStorage {
   get(key: string): string | null;
