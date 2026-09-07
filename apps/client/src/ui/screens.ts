@@ -1,5 +1,6 @@
 import type { Child } from "./dom.js";
 import { h } from "./dom.js";
+import { notice } from "./components/index.js";
 import {
   ADMIN_SECTION_LABELS,
   nightLabel,
@@ -187,11 +188,7 @@ function renderMain(state: AppViewState, actions: ScreenActions): Child[] {
 
 function renderNotice(state: AppViewState): Child[] {
   const tone = state.notice?.tone ?? "info";
-  return [
-    h("div", { className: `notice notice-${tone}`, role: "status" }, [
-      h("span", { className: "notice-text" }, state.notice?.text ?? ""),
-    ]),
-  ];
+  return [notice({ text: state.notice?.text ?? "", tone })];
 }
 
 // ---- Login ----
