@@ -1,0 +1,48 @@
+# =============================================================================
+# VOTACIONES2027 — Docker Compose (FASES 1-4 autorizadas del HITO DOCKER)
+#
+# Entorno de desarrollo LOCAL con PostgreSQL 18.4 reproducible.
+# Documentación completa: docs/operations/docker.md
+#
+# IMPORTANTE (leer antes de operar):
+#   - Puerto HOST 5433 -> puerto CONTAINER 5432.
+#     El 5432 del host puede estar ocupado por una instalación local.
+#   - `docker compose down`    conserva el volumen de datos (seguro).
+#   - `docker compose down -v` ELIMINA los datos de desarrollo (DESTRUCTIVO).
+#   - Credenciales SOLO de desarrollo (ver docker/.env.example).
+# =============================================================================
+
+name: votaciones2027
+
+services:
+  postgres:
+    image: postgres:18.4
+    container_name: votaciones2027-postgres
+    ports:
+      - "5433:5432"
+    environment:
+      # Valores por defecto para desarrollo. Documentados en docker/.env.example.
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-votaciones2027}
+    volumes:
+      - votaciones2027_pgdata:/var/lib/postgresql/data
+    networks:
+      - votaciones2027-net
+    healthcheck:
+      # pg_isready comprueba PostgreSQL (no la app). Se usa $$ para que la
+      # sustitución la haga el contenedor (variables de entorno), no Compose.
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  votaciones2027_pgdata:
+    name: votaciones2027_pgdata
+
+networks:
+  votaciones2027-net:
+    name: votaciones2027-net

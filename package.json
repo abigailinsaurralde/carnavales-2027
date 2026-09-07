@@ -10,7 +10,12 @@
   "scripts": {
     "typecheck": "npm run --workspaces --if-present typecheck",
     "test": "npm run --workspaces --if-present test",
-    "test:e2e": "vitest run tests/e2e"
+    "test:e2e": "vitest run tests/e2e",
+    "db:init": "node scripts/db/db.mjs init",
+    "db:migrate": "node scripts/db/db.mjs migrate",
+    "db:reset": "node scripts/db/db.mjs reset",
+    "docker:down": "docker compose -f docker/compose.yaml down",
+    "docker:up": "docker compose -f docker/compose.yaml up -d"
   },
   "workspaces": [
     "apps/*",

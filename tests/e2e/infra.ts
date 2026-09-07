@@ -6,7 +6,8 @@
  * API real (apps/api) sobre esa base. No reemplaza PostgreSQL por mocks.
  *
  * Comandos/componentes ACORDADOS con el HITO:
- *  - psql real de la instalación local (Guard verificado: puerto 5432 + binario).
+ *  - psql desde el entorno PostgreSQL Docker por defecto (E2E_PSQL_MODE=docker);
+ *    fallback explícito a psql local (E2E_PSQL_MODE=local) sin Docker.
  *  - node-pg solo para DROP/CREATE de la base y consultas de verificación.
  */
 import { execFile } from "node:child_process";
@@ -24,11 +25,13 @@ import { loadConfig } from "../../apps/api/src/config.js";
 import { createPool, type DbPool } from "../../apps/api/src/db/pool.js";
 import { createApp, type AppServer } from "../../apps/api/src/server.js";
 import {
+  E2E_ADMIN_DB_URL,
   E2E_DB_HOST,
   E2E_DB_NAME,
   E2E_DB_PORT,
   E2E_DB_URL,
-  E2E_ADMIN_DB_URL,
+  E2E_DB_USER,
+  E2E_PSQL_MODE,
   PSQL_BIN,
   SEED_STATEMENTS,
 } from "./fixtures.js";
@@ -38,6 +41,7 @@ const execFileAsync = promisify(execFile);
 
 export const REPO_ROOT = path.resolve(fileURLToPath(new URL("../../", import.meta.url)));
 export const MIGRATIONS_DIR = path.join(REPO_ROOT, "database", "migrations");
+export const COMPOSE_FILE = path.join(REPO_ROOT, "docker", "compose.yaml");
 
 // ---------------------------------------------------------------------------
 // Utilidades
@@ -96,7 +100,8 @@ export async function ensurePostgresRunning(): Promise<void> {
   if (!(await probeTcp(E2E_DB_HOST, E2E_DB_PORT))) {
     throw new Error(
       `[HITO E2E] PostgreSQL real no responde en ${E2E_DB_HOST}:${E2E_DB_PORT}. ` +
-        `Inicie el servicio postgresql antes de ejecutar npm run test:e2e.`,
+        `Inicie PostgreSQL antes de ejecutar npm run test:e2e ` +
+        `(entorno Docker: npm run docker:up; local: servicio postgresql).`,
     );
   }
 }
@@ -140,12 +145,50 @@ async function applyMigrationsFrom(psqlBin: string, dir: string): Promise<void> 
     const script = path.join(dir, file);
     // Las migraciones reales ya controlan su propia transacción (BEGIN/COMMIT
     // dentro del archivo); por eso NO se usa --single-transaction.
-    await execFileAsync(
-      psqlBin,
-      ["-v", "ON_ERROR_STOP=1", "-q", "-f", script, E2E_DB_URL],
-      { maxBuffer: 10 * 1024 * 1024 },
-    );
+    await runMigrationScript(psqlBin, script);
   }
+}
+
+/**
+ * Aplica UN script de migración con psql:
+ *  - modo "docker" (POR DEFECTO): psql se ejecuta dentro del contenedor de
+ *    Compose (docker/compose.yaml); el SQL entra por stdin. No se requiere
+ *    ningún binario psql local.
+ *  - modo "local": binario psql local + E2E_DB_URL (compatibilidad explícita
+ *    con entornos sin Docker).
+ */
+async function runMigrationScript(psqlBin: string, script: string): Promise<void> {
+  if (E2E_PSQL_MODE === "docker") {
+    const sql = await fsp.readFile(script, "utf8");
+    await execFileAsync(
+      "docker",
+      [
+        "compose",
+        "-f",
+        COMPOSE_FILE,
+        "exec",
+        "-T",
+        "postgres",
+        "psql",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-q",
+        "-U",
+        E2E_DB_USER,
+        "-d",
+        E2E_DB_NAME,
+        "-f",
+        "-",
+      ],
+      { input: sql, maxBuffer: 10 * 1024 * 1024 },
+    );
+    return;
+  }
+  await execFileAsync(
+    psqlBin,
+    ["-v", "ON_ERROR_STOP=1", "-q", "-f", script, E2E_DB_URL],
+    { maxBuffer: 10 * 1024 * 1024 },
+  );
 }
 
 /** Seed determinista del escenario E2E (ver fixtures.ts). */

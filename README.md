@@ -110,3 +110,19 @@ Reglamento aprobado
 ```
 
 El **Reglamento del Carnaval Goya 2027** será la fuente de verdad funcional. Cualquier regla relativa a votación, puntajes, penalizaciones y escrutinio debe derivarse de él y no inventarse.
+
+## 10. Entorno Docker (desarrollo)
+
+El proyecto incluye **PostgreSQL 18.4** reproducible en Docker para desarrollo (FASES 1-4 del HITO DOCKER). Documentación completa: `docs/operations/docker.md`.
+
+```bash
+npm run docker:up     # docker/compose.yaml: PostgreSQL 18.4 (host 5433 -> container 5432)
+npm run db:init       # crea la base de desarrollo votaciones2027 y aplica migraciones 001-007
+npm run db:seed       # NO existe: el seed 002 es TEST ONLY (db:init --seed)
+npm run dev -w @votaciones2027/api    # Backend local, DATABASE_URL -> localhost:5433
+npm run dev -w @votaciones2027/client # Frontend Vite
+```
+
+Tests: `npm run typecheck` / `npm run test` no requieren PostgreSQL. `npm run test:e2e` usa PostgreSQL Docker por defecto (requiere `npm run docker:up`; fallback local documentado en `docs/operations/docker.md`).
+
+> ADVERTENCIA: `docker compose down` conserva los datos; `docker compose down -v` los ELIMINA (destructivo).

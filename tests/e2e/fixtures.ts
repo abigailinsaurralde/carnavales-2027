@@ -17,24 +17,59 @@
  */
 
 // ---------------------------------------------------------------------------
-// Infraestructura PostgreSQL local (entorno de desarrollo verificado: psql 18.4)
+// Infraestructura PostgreSQL (entorno Docker del proyecto por defecto).
+//
+// Por defecto apunta al PostgreSQL 18.4 de Docker (host localhost, puerto host
+// 5433 publicado -> 5432 del contenedor; ver docker/compose.yaml). Todas las
+// constantes admiten override por variable de entorno para usar PostgreSQL
+// local (p. ej. E2E_DB_PORT=5432 con E2E_PSQL_MODE=local).
 // ---------------------------------------------------------------------------
 
-export const E2E_DB_HOST = "localhost";
-export const E2E_DB_PORT = 5432;
-export const E2E_DB_NAME = "votaciones2027_e2e";
-export const E2E_DB_USER = "postgres";
-export const E2E_DB_PASSWORD = "postgres";
+function envString(name: string, fallback: string): string {
+  const value = process.env[name];
+  return value === undefined || value === "" ? fallback : value;
+}
+
+function envPort(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  const port = Number(raw);
+  return Number.isInteger(port) && port > 0 && port <= 65535 ? port : fallback;
+}
+
+export const E2E_DB_HOST = envString("E2E_DB_HOST", "localhost");
+export const E2E_DB_PORT = envPort("E2E_DB_PORT", 5433);
+export const E2E_DB_NAME = envString("E2E_DB_NAME", "votaciones2027_e2e");
+export const E2E_DB_USER = envString("E2E_DB_USER", "postgres");
+export const E2E_DB_PASSWORD = envString("E2E_DB_PASSWORD", "postgres");
 
 /** Base administrativa desde la que se DROP/CREATE la base exclusiva de E2E. */
-export const E2E_ADMIN_DB_NAME = "postgres";
+export const E2E_ADMIN_DB_NAME = envString("E2E_ADMIN_DB_NAME", "postgres");
 
-export const E2E_ADMIN_DB_URL = `postgresql://${E2E_DB_USER}:${E2E_DB_PASSWORD}@${E2E_DB_HOST}:${E2E_DB_PORT}/${E2E_ADMIN_DB_NAME}`;
+export const E2E_ADMIN_DB_URL = envString(
+  "E2E_ADMIN_DB_URL",
+  `postgresql://${E2E_DB_USER}:${E2E_DB_PASSWORD}@${E2E_DB_HOST}:${E2E_DB_PORT}/${E2E_ADMIN_DB_NAME}`,
+);
 
-export const E2E_DB_URL = `postgresql://${E2E_DB_USER}:${E2E_DB_PASSWORD}@${E2E_DB_HOST}:${E2E_DB_PORT}/${E2E_DB_NAME}`;
+export const E2E_DB_URL = envString(
+  "E2E_DB_URL",
+  `postgresql://${E2E_DB_USER}:${E2E_DB_PASSWORD}@${E2E_DB_HOST}:${E2E_DB_PORT}/${E2E_DB_NAME}`,
+);
 
-/** Ruta verificada de psql en este entorno (no está en PATH). */
-export const PSQL_BIN = "C:\\Program Files\\PostgreSQL\\18\\bin\\psql.exe";
+/**
+ * Modo de resolución de psql para aplicar migraciones:
+ *  - "docker" (POR DEFECTO): psql se ejecuta DENTRO del contenedor postgres de
+ *    Compose (docker/compose.yaml). No se necesita ningún binario psql local.
+ *  - "local": usa un binario psql local (PSQL_BIN / E2E_PSQL_BIN o PATH) y
+ *    E2E_DB_URL (compatibilidad explícita con entornos sin Docker).
+ */
+export const E2E_PSQL_MODE = envString("E2E_PSQL_MODE", "docker");
+
+/** Ruta del binario psql local (solo para E2E_PSQL_MODE=local). */
+export const PSQL_BIN = envString(
+  "E2E_PSQL_BIN",
+  "C:\\Program Files\\PostgreSQL\\18\\bin\\psql.exe",
+);
 
 // ---------------------------------------------------------------------------
 // Identificadores deterministas (UUID v4/variant válidos)

@@ -1,7 +1,8 @@
 /**
  * HITO "Integración E2E real" — VOTACIONES2027 (Carnavales Goya 2027).
  *
- * Demuestra, contra infraestructura REAL (PostgreSQL local + API real +
+ * Demuestra, contra infraestructura REAL (PostgreSQL real — Docker por defecto,
+ * local opcional — + API real +
  * componente offline real del cliente) el flujo completo del PMV:
  *
  *   A. Autenticación real y token opaco (en BD solo SHA-256).
@@ -78,6 +79,7 @@ import {
   COMPARSA_ID,
   CONFIG_RULES_REF,
   E2E_DB_URL,
+  E2E_PSQL_MODE,
   EDITION_ID,
   ITEM_ID,
   JUDGE_DISPLAY_NAME,
@@ -169,7 +171,9 @@ describe("HITO E2E real: cliente offline-first -> API real -> PostgreSQL real", 
 
   beforeAll(async () => {
     await ensurePostgresRunning();
-    psqlBin = await resolvePsqlBin();
+    // Modo docker (por defecto): psql proviene del contenedor; no se resuelve
+    // ningún binario psql local. Solo el modo "local" usa resolvePsqlBin().
+    psqlBin = E2E_PSQL_MODE === "docker" ? "" : await resolvePsqlBin();
     await resetE2eDatabase();
     await applyMigrations(psqlBin);
     harness = await bootRealApi();
