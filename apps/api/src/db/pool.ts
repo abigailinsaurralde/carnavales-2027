@@ -32,13 +32,23 @@ export interface DbPool extends QueryRunner {
 function toDatabaseError(err: unknown): DatabaseError {
   if (err instanceof DatabaseError) return err;
   // Conserva el SQLSTATE original (p. ej. 23505) para que los repositorios
-  // puedan mapear violaciones de unicidad/FK a errores de negocio (409/404).
+  // puedan mapear violaciones de unicidad/FK a errores de negocio (409/404)
+  // y el nombre del constraint violado (locale-independiente) para distinguir
+  // qué UNIQUE/FK disparó el error sin parsear mensajes localizados.
   const message = err instanceof Error ? err.message : "Unknown DB error";
   const pgCode =
     typeof err === "object" && err !== null && "code" in err
       ? String((err as { code: unknown }).code)
       : undefined;
-  return new DatabaseError(message, pgCode === undefined ? undefined : pgCode);
+  const constraint =
+    typeof err === "object" && err !== null && "constraint" in err
+      ? String((err as { constraint: unknown }).constraint)
+      : undefined;
+  return new DatabaseError(
+    message,
+    pgCode === undefined ? undefined : pgCode,
+    constraint === undefined ? undefined : constraint,
+  );
 }
 
 export function createPool(databaseUrl: string): DbPool {

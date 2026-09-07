@@ -112,4 +112,23 @@ describe("createPool.withTransaction", () => {
       db.query("INSERT INTO x VALUES ($1)", ["1"]),
     ).rejects.toMatchObject({ pgCode: "23505" });
   });
+
+  it("conserva el nombre del constraint (locale-independiente) al envolver el 23505", async () => {
+    // Regresión del gap: el mapeo 23505→IDEMPOTENCY_CONFLICT en upsert-vote
+    // necesita distinguir QUÉ constraint disparó el 23505 sin parsear el
+    // mensaje localizado (internalMessage en español del servidor).
+    const pgLikeError = Object.assign(new Error("duplicate key value"), {
+      code: "23505",
+      constraint: "uq_vote_idempotency_per_judge",
+    });
+    vi.spyOn(pgMock.MockPool.prototype, "query").mockRejectedValueOnce(pgLikeError);
+    const db = createPool("postgresql://mock@localhost/mock");
+
+    await expect(
+      db.query("INSERT INTO x VALUES ($1)", ["1"]),
+    ).rejects.toMatchObject({
+      pgCode: "23505",
+      constraint: "uq_vote_idempotency_per_judge",
+    });
+  });
 });

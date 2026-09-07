@@ -133,15 +133,17 @@ export class UpsertVote implements UseCase<UpsertVoteInput, Vote> {
     );
 
     if (existingByIdempotencyKey !== null) {
-      const samePayload =
-        existingByIdempotencyKey.planillaId === planilla.id &&
-        existingByIdempotencyKey.comparsaId === comparsaId &&
-        existingByIdempotencyKey.rubroId === rubroId &&
-        existingByIdempotencyKey.itemId === itemId &&
-        existingByIdempotencyKey.candidateId === candidateId &&
-        existingByIdempotencyKey.score === score;
-
-      if (!samePayload) {
+      if (
+        !this.hasSamePayload(
+          existingByIdempotencyKey,
+          planilla.id,
+          comparsaId,
+          rubroId,
+          itemId,
+          candidateId,
+          score,
+        )
+      ) {
         throw new ConflictError(
           "Idempotency key already used with a different payload",
           "IDEMPOTENCY_CONFLICT",
@@ -203,24 +205,93 @@ export class UpsertVote implements UseCase<UpsertVoteInput, Vote> {
     // Último gate antes de escribir.
     assertNightWindowOpen(night, new Date());
 
-    return await this.votes.create({
-      id: voteId,
-      planillaId: planilla.id,
-      judgeId: input.judgeId,
-      nightId: night.id,
-      editionId: edition.id,
-      comparsaId,
-      rubroId,
-      itemId,
-      candidateId,
-      score,
-      scoreSource: "JUDGE",
-      idempotencyKey,
-      versionId: config.id,
-      ...(clientRef !== undefined ? { clientRef } : {}),
-      ...(input.payload.deviceContext !== undefined
-        ? { deviceContext: input.payload.deviceContext }
-        : {}),
-    });
+    try {
+      return await this.votes.create({
+        id: voteId,
+        planillaId: planilla.id,
+        judgeId: input.judgeId,
+        nightId: night.id,
+        editionId: edition.id,
+        comparsaId,
+        rubroId,
+        itemId,
+        candidateId,
+        score,
+        scoreSource: "JUDGE",
+        idempotencyKey,
+        versionId: config.id,
+        ...(clientRef !== undefined ? { clientRef } : {}),
+        ...(input.payload.deviceContext !== undefined
+          ? { deviceContext: input.payload.deviceContext }
+          : {}),
+      });
+    } catch (error) {
+      // Carrera check-then-insert (ventana 007): otro request con la MISMA
+      // (judge_id, idempotency_key) ganó entre nuestro findByIdempotencyKey
+      // (devolvió null) y nuestro INSERT → el constraint
+      // uq_vote_idempotency_per_judge (007) dispara 23505. Se re-evalúa como
+      // el path secuencial SIN cambiar el contrato del repositorio (el path de
+      // sync-planillas no pasa por aquí y conserva su comportamiento):
+      //   - mismo payload → replay idempotente del voto ganador (200);
+      //   - distinto payload → 409 IDEMPOTENCY_CONFLICT (el 500 genérico no es
+      //     un contrato válido para una violación de idempotencia).
+      if (
+        error instanceof DatabaseError &&
+        error.pgCode === "23505" &&
+        error.constraint === "uq_vote_idempotency_per_judge"
+      ) {
+        const concurrent = await this.votes.findByIdempotencyKey(
+          input.judgeId,
+          idempotencyKey,
+        );
+        if (concurrent !== null) {
+          if (
+            this.hasSamePayload(
+              concurrent,
+              planilla.id,
+              comparsaId,
+              rubroId,
+              itemId,
+              candidateId,
+              score,
+            )
+          ) {
+            return concurrent;
+          }
+          throw new ConflictError(
+            "Idempotency key already used with a different payload",
+            "IDEMPOTENCY_CONFLICT",
+          );
+        }
+      }
+      // Otro 23505 (p. ej. clave de negocio) o constraint distinto: no se
+      // reinterpreta, se propaga como DatabaseError (500 genérico, handler.ts).
+      throw error;
+    }
+  }
+
+  /**
+   * Compara un voto persistido contra el payload del request en curso para
+   * decidir si un idempotencyKey reutilizado corresponde a un replay idempotente
+   * (mismo payload → OK) o a un uso ilegítimo con payload alterado (409).
+   * Misma semántica en el path secuencial y en la recuperación de la carrera 23505.
+   */
+  private hasSamePayload(
+    vote: Vote,
+    planillaId: string,
+    comparsaId: string,
+    rubroId: string,
+    itemId: string,
+    candidateId: string,
+    score: number,
+  ): boolean {
+    return (
+      vote.planillaId === planillaId &&
+      vote.comparsaId === comparsaId &&
+      vote.rubroId === rubroId &&
+      vote.itemId === itemId &&
+      vote.candidateId === candidateId &&
+      vote.score === score
+    );
   }
 }

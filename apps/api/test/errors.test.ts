@@ -40,4 +40,11 @@ describe("DatabaseError", () => {
     expect(err.statusCode).toBe(500);
     expect(err.code).toBe("DATABASE_ERROR");
   });
+
+  it("carries the pgCode and the constraint name when provided", () => {
+    const err = new DatabaseError("duplicate key", "23505", "uq_vote_idempotency_per_judge");
+    expect(err.pgCode).toBe("23505");
+    expect(err.constraint).toBe("uq_vote_idempotency_per_judge");
+    expect(err.internalMessage).toBe("duplicate key");
+  });
 });

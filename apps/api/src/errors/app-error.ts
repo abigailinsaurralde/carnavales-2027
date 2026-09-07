@@ -24,7 +24,22 @@ export class ValidationError extends AppError {
 }
 
 export class DatabaseError extends AppError {
-  constructor(internalMessage: string, readonly pgCode?: string) {
+  /**
+   * @param internalMessage Mensaje técnico (SQL/driver). Nunca se expone al
+   *   cliente (handler.ts): solo se registra en logs.
+   * @param pgCode SQLSTATE (p. ej. "23505") conservado para que repositorios y
+   *   casos de uso puedan mapear violaciones de persistencia a errores de
+   *   negocio (409/404) sin depender de mensajes localizados.
+   * @param constraint Nombre del constraint de PostgreSQL violado (solo en
+   *   violaciones de unicidad/FK/CHECK). Independiente del locale, a
+   *   diferencia de internalMessage: permite distinguir QUÉ constraint disparó
+   *   un 23505 sin parsear texto.
+   */
+  constructor(
+    internalMessage: string,
+    readonly pgCode?: string,
+    readonly constraint?: string,
+  ) {
     super("Database operation failed", 500, "DATABASE_ERROR");
     this.name = "DatabaseError";
     this.internalMessage = internalMessage;

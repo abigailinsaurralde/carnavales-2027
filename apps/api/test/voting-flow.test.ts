@@ -47,6 +47,7 @@ import type {
 import type { VoteRepository } from "../src/domain/repositories/vote-repository.js";
 import {
   ConflictError,
+  DatabaseError,
   ForbiddenError,
   NotFoundError,
   ValidationError,
@@ -490,6 +491,65 @@ class FakeVoteRepository implements VoteRepository {
   }
 }
 
+/**
+ * Simula la ventana check-then-insert de la carrera (007): en la PRIMERA tanda
+ * de chequeos del caso de uso (findByIdempotencyKey/findByBusinessKey) el
+ * ganador aún no es visible (devuelve null); luego el INSERT del perdedor
+ * dispara el 23505 de uq_vote_idempotency_per_judge y los re-checks de
+ * recuperación (inducidos por el new code) ya ven al ganador.
+ */
+class RacingVoteRepository implements VoteRepository {
+  private preCheckDone = false;
+
+  constructor(
+    private readonly inner: FakeVoteRepository,
+    private readonly constraint: string = "uq_vote_idempotency_per_judge",
+  ) {}
+
+  async findByPlanilla(planillaId: string): Promise<Vote[]> {
+    return this.inner.findByPlanilla(planillaId);
+  }
+  async findById(id: string): Promise<Vote | null> {
+    return this.inner.findById(id);
+  }
+  async findByBusinessKey(
+    judgeId: string,
+    nightId: string,
+    comparsaId: string,
+    rubroId: string,
+    itemId: string,
+    candidateId: string,
+  ): Promise<Vote | null> {
+    if (!this.preCheckDone) return null; // ventana: el ganador aún no es visible
+    return this.inner.findByBusinessKey(judgeId, nightId, comparsaId, rubroId, itemId, candidateId);
+  }
+  async findByIdempotencyKey(judgeId: string, idempotencyKey: string): Promise<Vote | null> {
+    if (!this.preCheckDone) return null; // ventana: el ganador aún no se insertó
+    return this.inner.findByIdempotencyKey(judgeId, idempotencyKey);
+  }
+  async findByClientRef(judgeId: string, clientRef: string): Promise<Vote | null> {
+    return this.inner.findByClientRef(judgeId, clientRef);
+  }
+  async create(input: Parameters<VoteRepository["create"]>[0]): Promise<Vote> {
+    // Cierra la ventana: la recuperación (post-create) ya ve al ganador.
+    this.preCheckDone = true;
+    throw new DatabaseError(
+      "duplicate key value violates unique constraint",
+      "23505",
+      this.constraint,
+    );
+  }
+  async update(id: string, input: Parameters<VoteRepository["update"]>[1]): Promise<Vote> {
+    return this.inner.update(id, input);
+  }
+  async confirm(id: string, confirmedAt: Date): Promise<void> {
+    return this.inner.confirm(id, confirmedAt);
+  }
+  async delete(id: string): Promise<void> {
+    return this.inner.delete(id);
+  }
+}
+
 class FakeAuditRepository implements AuditRepository {
   readonly events: CreateAuditEventInput[] = [];
   async create(input: CreateAuditEventInput) {
@@ -750,6 +810,85 @@ describe("UpsertVote use-case", () => {
         payload: validVotePayload({ comparsaId: OTHER_COMPARSA_ID }),
       }),
     ).rejects.toThrow(ConflictError);
+  });
+
+  it("carrera 23505 (uq_vote_idempotency_per_judge): distinto payload → 409 IDEMPOTENCY_CONFLICT en vez de 500", async () => {
+    const repos = buildFakes();
+    await withPlanilla(repos);
+    // El ganador usó la MISMA idempotencyKey con OTRO payload (clave de negocio
+    // distinta) y ya está persistido cuando el perdedor ejecuta su INSERT.
+    await repos.votes.create({
+      id: VOTE2_ID,
+      planillaId,
+      judgeId: JUDGE_ID,
+      nightId: NIGHT_A_ID,
+      editionId: EDITION_ID,
+      comparsaId: OTHER_COMPARSA_ID,
+      rubroId: VESTUARIO_RUBRO_ID,
+      itemId: VESTUARIO_ITEM_ID,
+      candidateId: VESTUARIO_CANDIDATE_ID,
+      score: 7,
+      scoreSource: "JUDGE",
+      idempotencyKey: "key-race",
+      versionId: CONFIG_ID,
+    });
+    repos.votes = new RacingVoteRepository(repos.votes);
+    const uc = buildUpsert(repos);
+
+    await expect(
+      uc.execute({
+        judgeId: JUDGE_ID,
+        planillaId,
+        voteId: VOTE_ID,
+        payload: validVotePayload({ idempotencyKey: "key-race" }),
+      }),
+    ).rejects.toMatchObject({ code: "IDEMPOTENCY_CONFLICT" });
+  });
+
+  it("carrera 23505 (uq_vote_idempotency_per_judge): mismo payload → replay idempotente del voto ganador", async () => {
+    const repos = buildFakes();
+    await withPlanilla(repos);
+    // El ganador usó la MISMA idempotencyKey y el MISMO payload. Los chequeos
+    // previos no lo ven (ventana), el INSERT del perdedor dispara 23505 y la
+    // recuperación devuelve el voto existente (PUT idempotente, 200).
+    await repos.votes.create({
+      id: VOTE2_ID,
+      planillaId,
+      judgeId: JUDGE_ID,
+      nightId: NIGHT_A_ID,
+      editionId: EDITION_ID,
+      comparsaId: COMPARSA_ID,
+      rubroId: RUBRO_ID,
+      itemId: ITEM_ID,
+      candidateId: CANDIDATE_ID,
+      score: 8.5,
+      scoreSource: "JUDGE",
+      idempotencyKey: "key-race",
+      versionId: CONFIG_ID,
+    });
+    repos.votes = new RacingVoteRepository(repos.votes);
+    const uc = buildUpsert(repos);
+
+    const replayed = await uc.execute({
+      judgeId: JUDGE_ID,
+      planillaId,
+      voteId: VOTE_ID,
+      payload: validVotePayload({ idempotencyKey: "key-race" }),
+    });
+
+    expect(replayed.id).toBe(VOTE2_ID);
+    expect(await repos.votes.findByPlanilla(planillaId)).toHaveLength(1);
+  });
+
+  it("carrera con OTRO constraint (clave de negocio): NO se reinterpreta, propaga DatabaseError", async () => {
+    const repos = buildFakes();
+    await withPlanilla(repos);
+    repos.votes = new RacingVoteRepository(repos.votes, "uq_vote_per_judge_night_comparsa_rubro_item_candidate");
+    const uc = buildUpsert(repos);
+
+    await expect(
+      uc.execute({ judgeId: JUDGE_ID, planillaId, voteId: VOTE_ID, payload: validVotePayload() }),
+    ).rejects.toBeInstanceOf(DatabaseError);
   });
 
   it("reutiliza un voto existente por clave de negocio (actualiza conservando el id original)", async () => {
@@ -1051,6 +1190,39 @@ describe("ConfirmPlanilla use-case", () => {
     expect(second.planilla.status).toBe("CONFIRMADA");
     expect(second.planilla.confirmedAt).toBeDefined();
     expect(repos.audits.events).toHaveLength(eventsAfterFirst);
+  });
+
+  it("caso 0/0: sin votos y sin candidatos elegibles igual confirma y audita la planilla (regresión)", async () => {
+    const repos = buildFakes();
+    // Catálogo sin candidatos elegibles para la especialidad BAILE asignada
+    // (rubro BAILE sin item ni candidate): ni votos ni omisiones posibles.
+    repos.catalogue = new FakeCatalogueRepository(
+      [{ ...rubro, specialtyId: SPECIALTY_ID_BAILE }],
+      [],
+      [],
+      [comparsa, otherComparsa],
+    );
+    await seedPlanilla(repos);
+    const uc = buildConfirm(repos);
+
+    const result = await uc.execute({ judgeId: JUDGE_ID, planillaId: PLANILLA_ID });
+
+    expect(result.votesConfirmed).toBe(0);
+    expect(result.omissionsInserted).toBe(0);
+    expect(result.rubroTotals).toEqual([]);
+    expect(result.planilla).toMatchObject({ id: PLANILLA_ID, status: "CONFIRMADA" });
+    expect(result.planilla.confirmedAt).toBeDefined();
+
+    // La respuesta CONFIRMADA debe corresponder con el estado persistido:
+    // la planilla pasa a CONFIRMADA con confirmedAt aunque no haya mutado votos.
+    const stored = await repos.planillas.findById(PLANILLA_ID);
+    expect(stored?.status).toBe("CONFIRMADA");
+    expect(stored?.confirmedAt).not.toBeNull();
+
+    const types = repos.audits.events.map((e) => e.eventType);
+    expect(types).toContain("PLANILLA_MODIFIED");
+    expect(types).not.toContain("VOTE_CONFIRMED");
+    expect(types).not.toContain("OMISSION_CORRECTED");
   });
 
   it("rechaza (NotFound) una planilla de otro juez", async () => {

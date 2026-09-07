@@ -237,22 +237,27 @@ export class ConfirmPlanilla
       const finalVotes = await tx.votes.findByPlanilla(planilla.id);
       const rubroTotals = computeRubroTotals(finalVotes);
 
-      // Transición de la planilla a CONFIRMADA (§21) + auditoría.
-      if (votesConfirmed > 0 || omissionsInserted > 0) {
-        await tx.planillas.confirm(planilla.id, confirmedAt);
-        await tx.audits.create({
-          eventType: "PLANILLA_MODIFIED",
-          entityType: "PLANILLA",
-          entityId: planilla.id,
-          actorUserId: input.judgeId,
-          payload: {
-            action: "CONFIRMED",
-            previousStatus: planilla.status,
-            newStatus: "CONFIRMADA" as const,
-            confirmedAt: confirmedAt.toISOString(),
-          },
-        });
-      }
+      // Transición de la planilla a CONFIRMADA (§21) + auditoría. Se ejecuta
+      // SIEMPRE en la transición BORRADOR/EN_EVALUACION → CONFIRMADA, incluso
+      // cuando no hubo votos que confirmar ni omisiones que subsanar (caso
+      // 0/0: planilla vacía y sin candidatos elegibles para la especialidad
+      // asignada — p. ej. catálogo vacío). La respuesta siempre declara
+      // status CONFIRMADA con confirmedAt (efecto 3 del contrato); el guard
+      // anterior dejaba la planilla persistida como BORRADOR sin auditoría en
+      // ese caso (inconsistencia real verificada por probe).
+      await tx.planillas.confirm(planilla.id, confirmedAt);
+      await tx.audits.create({
+        eventType: "PLANILLA_MODIFIED",
+        entityType: "PLANILLA",
+        entityId: planilla.id,
+        actorUserId: input.judgeId,
+        payload: {
+          action: "CONFIRMED",
+          previousStatus: planilla.status,
+          newStatus: "CONFIRMADA" as const,
+          confirmedAt: confirmedAt.toISOString(),
+        },
+      });
 
       return {
         planilla: toSharedPlanilla({

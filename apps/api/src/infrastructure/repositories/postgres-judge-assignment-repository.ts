@@ -89,11 +89,17 @@ export class PostgresJudgeAssignmentRepository
     judgeId: string,
     nightId: string,
   ): Promise<EffectiveAssignment | null> {
+    // ORDER BY s.code: resolución DETERMINISTA cuando el juez tiene más de una
+    // asignación efectiva en la misma noche (estado que el console admin
+    // admite hoy; el conjunto de incompatibilidades es PEND-112 y NO se decide
+    // aquí). Sin el ORDER BY, `LIMIT 1` devolvía una fila arbitraria y el
+    // resultado del caso de uso dependía del plan físico de PostgreSQL.
     const result = await this.db.query<EffectiveAssignmentRow>(
       `SELECT ja.id, ja.night_id, ja.specialty_id, s.code AS specialty_code
        FROM judge_assignment ja
        JOIN specialty s ON s.id = ja.specialty_id
        WHERE ja.judge_id = $1 AND ja.night_id = $2 AND ja.is_effective = TRUE
+       ORDER BY s.code
        LIMIT 1`,
       [judgeId, nightId],
     );
