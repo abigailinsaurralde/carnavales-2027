@@ -40,6 +40,10 @@ interface StubServer {
   loginFails: boolean;
   issueFails: boolean;
   exchangeFails: boolean;
+  /** simula falla de red en el canal de sync (retryable → MAX_ATTEMPTS). */
+  syncNetwork?: boolean;
+  /** simula una respuesta HTTP no recuperable en el canal de sync (blocked). */
+  syncStatus?: "UNAUTHORIZED" | "CONFLICT";
 }
 
 function makeRouter(initial: Route): Router {
@@ -194,6 +198,7 @@ function makeHarness(options?: {
   issueFails?: boolean;
   exchangeFails?: boolean;
   initialOnline?: boolean;
+  maxAttempts?: number;
 }): Harness {
   const kv = new MemoryStorage();
   const store = new OfflineStore(kv);
@@ -230,6 +235,39 @@ function makeHarness(options?: {
     store,
     transport: {
       async syncPlanillas(request) {
+        if (server.syncNetwork === true) {
+          // falla transitoria de red → reintentos agotados → retryable:true
+          return { ok: false, kind: "NETWORK" };
+        }
+        if (server.syncStatus === "UNAUTHORIZED") {
+          return {
+            ok: false,
+            kind: "HTTP",
+            status: 401,
+            body: {
+              error: {
+                code: "UNAUTHORIZED",
+                message: "sesión inválida (401)",
+              },
+            },
+          };
+        }
+        if (server.syncStatus === "CONFLICT") {
+          return {
+            ok: true,
+            data: {
+              planillas: [
+                {
+                  planillaId: request.planillas[0]!.planilla.id,
+                  planillaAction: "CONFLICT" as const,
+                  reason: "PLANILLA_REMOTE_CHANGED",
+                  votes: [],
+                },
+              ],
+              syncedAt: "2027-01-01T00:00:00.000Z",
+            },
+          };
+        }
         const res = await serverFetch(server)("http://test/judge/planillas/sync", {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -241,8 +279,8 @@ function makeHarness(options?: {
     },
     connectivity,
     clock: systemClock,
-    maxAttempts: 8,
     backoff: { baseMs: 1000, maxMs: 60000, random: () => 0.5 },
+    maxAttempts: options?.maxAttempts ?? 8,
     onStatusChange: (snapshot) => statusListener?.(snapshot),
   });
 
@@ -258,6 +296,7 @@ function makeHarness(options?: {
         };
       },
       syncAllOnce: () => sync.syncAllOnce(),
+      retryRecoverableFailures: () => sync.retryRecoverableFailures(),
       enqueuePlanilla: (planilla, votes) => sync.enqueuePlanilla(planilla, votes),
     },
     connectivity,
@@ -521,11 +560,85 @@ describe("flujo del juez (login → notas → sync → confirmación)", () => {
   });
 });
 
+describe("estados de sincronización (F4)", () => {
+  it("propaga syncBlocked cuando una operación queda bloqueada (retryable:false)", async () => {
+    const h = makeHarness();
+    const app = h.app;
+    await app.boot();
+    await loginAsJudge(h);
+
+    h.server.syncStatus = "UNAUTHORIZED";
+    await app.createPlanilla(NIGHT_ID);
+    await h.sync.whenIdle();
+
+    const op = h.store.listOperations()[0]!;
+    expect(op.state).toBe("FAILED");
+    expect(op.lastError?.retryable).toBe(false);
+    expect(app.getState().syncBlocked).toBe(true);
+    expect(app.getState().syncRecoverable).toBe(false);
+  });
+
+  it("no presenta un error recuperable como bloqueado y la recuperación manual lo resuelve", async () => {
+    const h = makeHarness({ maxAttempts: 1 });
+    const app = h.app;
+    await app.boot();
+    await loginAsJudge(h);
+
+    h.server.syncNetwork = true;
+    await app.createPlanilla(NIGHT_ID);
+    await h.sync.whenIdle();
+
+    const op = h.store.listOperations()[0]!;
+    expect(op.state).toBe("FAILED");
+    expect(op.lastError?.retryable).toBe(true);
+    expect(app.getState().syncBlocked).toBe(false);
+    expect(app.getState().syncRecoverable).toBe(true);
+
+    h.server.syncNetwork = false;
+    await app.retrySync();
+    await h.sync.whenIdle();
+    expect(h.store.listOperations()[0]?.state).toBe("SYNCED");
+    expect(app.getState().syncBlocked).toBe(false);
+    expect(app.getState().syncRecoverable).toBe(false);
+    // Tras una recuperación manual exitosa el mensaje nunca debe sugerir
+    // "nada pendiente": `retrySync` reactiva la operación y la envía con su
+    // drenado único y esperado (`syncAllOnce`).
+    expect([
+      "Sincronizado.",
+      "La operación recuperable fue enviada correctamente.",
+    ]).toContain(app.getState().notice?.text);
+    expect(app.getState().notice?.tone).toBe("success");
+  });
+
+  it("conserva lastError.message y mantiene canConfirm bloqueado para una operación FAILED", async () => {
+    const h = makeHarness();
+    const app = h.app;
+    await app.boot();
+    await loginAsJudge(h);
+
+    h.server.syncStatus = "UNAUTHORIZED";
+    await app.createPlanilla(NIGHT_ID);
+    await h.sync.whenIdle();
+
+    const planillaId = h.planillaIds[0]!;
+    await app.openPlanilla(planillaId);
+    const detail = app.getState().detail;
+    expect(detail).not.toBeNull();
+    expect(detail?.planillaFailure?.retryable).toBe(false);
+    expect(detail?.planillaFailure?.message).toContain("401");
+    expect(
+      detail?.blockedReasons.some((r) => r.includes("Operación bloqueada")),
+    ).toBe(true);
+    expect(detail?.canConfirm).toBe(false);
+  });
+});
+
 function emptySyncSource() {
   return {
-    getSnapshot: () => ({ online: false, pending: 0, syncing: 0, synced: 0, failed: 0 }),
+    getSnapshot: () => ({ online: false, pending: 0, syncing: 0, synced: 0, failed: 0, blocked: 0, retryableFailed: 0 }),
     whenStatusChanges: () => () => undefined,
     syncAllOnce: async () => ({ attempted: 0, synced: 0, failed: 0, retried: 0 }),
+    retryRecoverableFailures: async () => 0,
     enqueuePlanilla: async () => {
       throw new Error("not used");
     },

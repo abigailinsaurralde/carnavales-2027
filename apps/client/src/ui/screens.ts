@@ -149,18 +149,39 @@ function renderTopBar(state: AppViewState, actions: ScreenActions): Child[] {
 }
 
 function renderNav(state: AppViewState, actions: ScreenActions): Child[] {
-  const hasWork = state.snapshot.pending > 0 || state.snapshot.syncing > 0 || state.snapshot.failed > 0;
+  const pending = state.snapshot.pending;
+  const syncing = state.snapshot.syncing;
+  const recoverable = state.snapshot.retryableFailed;
+  const blocked = state.snapshot.blocked;
+  const hasWork = pending > 0 || syncing > 0 || recoverable > 0 || blocked > 0;
+  const badges: Child[] = [];
+  if (syncing > 0) {
+    badges.push(h("span", { className: "nav-badge" }, "Sincronizando…"));
+  }
+  if (pending > 0) {
+    badges.push(
+      h("span", { className: "nav-badge" }, `${pending} pendiente(s)`),
+    );
+  }
+  if (recoverable > 0) {
+    badges.push(
+      h(
+        "span",
+        { className: "nav-badge tone-warn", title: "Error recuperable agotado. Usá \"Sincronizar ahora\"." },
+        "Error recuperable",
+      ),
+    );
+  }
+  if (blocked > 0) {
+    badges.push(
+      h("span", { className: "nav-badge tone-error" }, "Operación bloqueada"),
+    );
+  }
   return [
     h("div", { className: "nav" }, [
       h("span", { className: `dot ${state.online ? "dot-online" : "dot-offline"}` }),
       h("span", { className: "nav-conn" }, state.online ? "Conectado" : "Desconectado"),
-      ...(state.snapshot.syncing > 0
-        ? [h("span", { className: "nav-badge" }, "Sincronizando…")]
-        : state.snapshot.pending > 0
-          ? [h("span", { className: "nav-badge" }, `${state.snapshot.pending} pendiente(s)`)]
-          : state.snapshot.failed > 0
-            ? [h("span", { className: "nav-badge tone-error" }, "Con errores")]
-            : []),
+      ...badges,
       ...(hasWork
         ? [
             h("button", {
@@ -462,7 +483,11 @@ function renderPlanilla(state: AppViewState, actions: ScreenActions): Child[] {
   const specialty =
     SPECIALTY_LABELS[d.specialty as keyof typeof SPECIALTY_LABELS] ?? d.specialty;
   const statusLabel = planillaStatusLabel(d.status);
-  const syncLabel = chipForSync(d.planillaSync);
+  const syncLabel = chipForSync(d.planillaSync, d.planillaFailure);
+  const failureTitle =
+    d.planillaFailure?.message === undefined
+      ? {}
+      : { title: d.planillaFailure.message };
 
   return [
     h("section", { className: "screen planilla" }, [
@@ -471,7 +496,15 @@ function renderPlanilla(state: AppViewState, actions: ScreenActions): Child[] {
           h("h2", { className: "planilla-title" }, `${nightLabel(d.nightNumber)} · ${specialty}`),
           h("div", { className: "planilla-badges" }, [
             h("span", { className: `badge ${STATUS_TONE[d.status] ?? ""}` }, statusLabel),
-            ...(syncLabel === null ? [] : [h("span", { className: `badge ${syncLabel.tone}` }, syncLabel.label)]),
+            ...(syncLabel === null
+              ? []
+              : [
+                  h(
+                    "span",
+                    { className: `badge ${syncLabel.tone}`, ...failureTitle },
+                    syncLabel.label,
+                  ),
+                ]),
           ]),
         ]),
         h(
@@ -595,13 +628,25 @@ function shortDateTime(iso: string): string {
   });
 }
 
-function chipForSync(sync: string): { label: string; tone: string } | null {
+function chipForSync(
+  sync: string,
+  failure: { retryable: boolean; message: string } | null | undefined,
+): { label: string; tone: string } | null {
   switch (sync) {
     case "pending":
       return { label: "Por sincronizar", tone: "tone-warn" };
     case "syncing":
       return { label: "Sincronizando", tone: "tone-info" };
     case "error":
+      // F4: un error con diagnóstico retryable=false es una operación
+      // BLOQUEADA; retryable=true un error recuperable agotado. Nunca se
+      // etiqueta un error recuperable como "bloqueado".
+      if (failure != null && failure.retryable) {
+        return { label: "Error recuperable", tone: "tone-warn" };
+      }
+      if (failure != null) {
+        return { label: "Operación bloqueada", tone: "tone-error" };
+      }
       return { label: "Error de sincronización", tone: "tone-error" };
     default:
       return null;

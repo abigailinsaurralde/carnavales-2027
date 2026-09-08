@@ -1,4 +1,5 @@
 import {
+  createBackendProbe,
   createBrowserConnectivity,
   createHttpTransport,
   createId,
@@ -57,6 +58,18 @@ async function main(): Promise<void> {
   });
   sync.start();
 
+  // F4.1 — Backend probe: corrige el estado de Connectivity según si el
+  // backend responde `GET /health` (cualquier HTTP = alcanzable). Con
+  // `navigator.onLine` true pero backend caído, UI queda "Desconectado".
+  const probe = createBackendProbe({
+    baseUrl: apiBaseUrl(),
+    connectivity,
+    clock,
+    timeoutMs: 4000,
+    intervalMs: 20000,
+  });
+  probe.start();
+
   const syncSource: SyncSource = {
     getSnapshot: () => sync.getSnapshot(),
     whenStatusChanges: (listener) => {
@@ -66,6 +79,7 @@ async function main(): Promise<void> {
       };
     },
     syncAllOnce: () => sync.syncAllOnce(),
+    retryRecoverableFailures: () => sync.retryRecoverableFailures(),
     enqueuePlanilla: (planilla, votes) => sync.enqueuePlanilla(planilla, votes),
   };
 

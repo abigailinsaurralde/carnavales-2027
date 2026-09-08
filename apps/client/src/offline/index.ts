@@ -7,4 +7,5 @@ export * from "./clock.js";
 export * from "./backoff.js";
 export * from "./connectivity.js";
 export * from "./transport.js";
+export * from "./probe.js";
 export * from "./sync-manager.js";

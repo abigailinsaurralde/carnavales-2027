@@ -97,7 +97,7 @@ describe("components — helpers puros de presentación", () => {
   });
 
   it("syncInfo presenta el estado de la cola sin inventar reglas", () => {
-    const base = { online: true, pending: 0, syncing: 0, synced: 5, failed: 0 };
+    const base = { online: true, pending: 0, syncing: 0, synced: 5, failed: 0, blocked: 0, retryableFailed: 0 };
     expect(syncInfo(base)).toEqual({ label: "Sincronizado", tone: "ok" });
     expect(syncInfo({ ...base, pending: 2 })).toEqual({
       label: "Cambios sin sincronizar",

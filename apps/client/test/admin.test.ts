@@ -244,9 +244,10 @@ function adminFetch(server: AdminServer) {
 
 function emptySyncSource() {
   return {
-    getSnapshot: () => ({ online: false, pending: 0, syncing: 0, synced: 0, failed: 0 }),
+    getSnapshot: () => ({ online: false, pending: 0, syncing: 0, synced: 0, failed: 0, blocked: 0, retryableFailed: 0 }),
     whenStatusChanges: () => () => undefined,
     syncAllOnce: async () => ({ attempted: 0, synced: 0, failed: 0, retried: 0 }),
+    retryRecoverableFailures: async () => 0,
     enqueuePlanilla: async () => {
       throw new Error("not used");
     },

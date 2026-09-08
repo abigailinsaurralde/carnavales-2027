@@ -96,6 +96,14 @@ export interface DetailView {
   planillaSync: "ok" | "pending" | "syncing" | "error" | "none";
   canConfirm: boolean;
   blockedReasons: string[];
+  /**
+   * Diagnóstico conservado del último error de la cola de esta planilla
+   * (`OutboxOperation.lastError`), si existe. Diferencia el estado de la
+   * operación: `retryable === false` es una operación BLOQUEADA (conflicto,
+   * 4xx, planilla perdida) y `retryable === true` un error recuperable
+   * agotado. `null` cuando la planilla no tiene error sin resolver.
+   */
+  planillaFailure?: { retryable: boolean; message: string } | null;
   reviewing: boolean;
   confirmOpen: boolean;
   busy: boolean;
@@ -134,6 +142,10 @@ export interface AppViewState {
   user: AuthenticatedUser | null;
   online: boolean;
   snapshot: SyncSnapshot;
+  /** Hay al menos una operación bloqueada (FAILED + retryable:false). */
+  syncBlocked: boolean;
+  /** Hay al menos una operación con error recuperable agotado (FAILED + retryable:true). */
+  syncRecoverable: boolean;
   context: JudgeContextResponse | null;
   planillas: PlanillaCard[];
   detail: DetailView | null;
@@ -163,6 +175,7 @@ export interface SyncSource {
   getSnapshot(): SyncSnapshot;
   whenStatusChanges(listener: (snapshot: SyncSnapshot) => void): () => void;
   syncAllOnce(): Promise<DrainOutcome>;
+  retryRecoverableFailures(): Promise<number>;
   enqueuePlanilla(planilla: LocalPlanilla, votes: LocalVote[]): Promise<OutboxOperation>;
 }
 
@@ -177,7 +190,9 @@ export class JudgeApp {
     route: { name: "login" },
     user: null,
     online: true,
-    snapshot: { online: true, pending: 0, syncing: 0, synced: 0, failed: 0 },
+    snapshot: { online: true, pending: 0, syncing: 0, synced: 0, failed: 0, blocked: 0, retryableFailed: 0 },
+    syncBlocked: false,
+    syncRecoverable: false,
     context: null,
     planillas: [],
     detail: null,
@@ -207,6 +222,8 @@ export class JudgeApp {
     });
     services.sync.whenStatusChanges((snapshot) => {
       this.state.snapshot = snapshot;
+      this.state.syncBlocked = snapshot.blocked > 0;
+      this.state.syncRecoverable = snapshot.retryableFailed > 0;
       this.emit();
       void this.refreshIfNeeded();
     });
@@ -634,6 +651,14 @@ export class JudgeApp {
 
     const op = this.services.store.findOperationByPlanilla(planillaId);
     const planillaSync = this.planillaSyncState(op, localVotes);
+    // Diagnóstico conservado de la última falla de la cola de esta planilla
+    // (F4): diferencia operación bloqueada (retryable:false) de error
+    // recuperable agotado (retryable:true). Nunca se resuelve un conflicto
+    // silenciosamente: el mensaje se conserva para la UI.
+    const planillaFailure =
+      op !== null && op.lastError !== undefined
+        ? { retryable: op.lastError.retryable, message: op.lastError.message }
+        : null;
     // La cola está "en vuelo" si hay una operación sin confirmación del
     // servidor (PENDING/SYNCING/FAILED) o alguna nota rechazada (FAILED): en
     // cualquiera de esos casos el servidor aún no tiene la versión definitiva
@@ -646,6 +671,7 @@ export class JudgeApp {
       local.status,
       hasPendingSync,
       this.state.online,
+      planillaFailure,
     );
     const canConfirm = canConfirmPlanilla({
       planillaStatus: local.status,
@@ -683,6 +709,7 @@ export class JudgeApp {
       this.state.detail?.confirmedRubroTotals === null
         ? { confirmedRubroTotals: null }
         : { confirmedRubroTotals: this.state.detail.confirmedRubroTotals }),
+      ...(planillaFailure === null ? { planillaFailure: null } : { planillaFailure }),
       ...(nightWindow === undefined ? {} : { nightWindow }),
     };
     this.emit();
@@ -692,6 +719,7 @@ export class JudgeApp {
     status: string,
     hasPendingSync: boolean,
     online: boolean,
+    failure: { retryable: boolean; message: string } | null,
   ): string[] {
     const reasons: string[] = [];
     if (!isEditable(status) && status !== "NO_PLANILLA") {
@@ -701,7 +729,15 @@ export class JudgeApp {
       reasons.push("Sin conexión: tus notas se guardan en este dispositivo.");
     }
     if (hasPendingSync) {
-      reasons.push("Hay notas sin sincronizar. Esperá a que sincronicen antes de confirmar.");
+      if (failure !== null) {
+        reasons.push(
+          failure.retryable
+            ? `Error recuperable: ${failure.message}`
+            : `Operación bloqueada: ${failure.message}`,
+        );
+      } else {
+        reasons.push("Hay notas sin sincronizar. Esperá a que sincronicen antes de confirmar.");
+      }
     }
     return reasons;
   }
@@ -847,8 +883,16 @@ export class JudgeApp {
       this.setNotice("Sin conexión. Reintentá cuando estés conectado.", "info");
       return;
     }
+    // Recuperación manual autorizada: reactiva SOLO errores recuperables
+    // agotados (FAILED + retryable:true); nunca operaciones bloqueadas.
+    const recovered = await this.services.sync.retryRecoverableFailures();
     const res = await this.services.sync.syncAllOnce();
-    if (res.attempted === 0 && res.synced === 0 && res.failed === 0) {
+    if (
+      res.attempted === 0 &&
+      res.synced === 0 &&
+      res.failed === 0 &&
+      recovered === 0
+    ) {
       this.setNotice("Nada pendiente de sincronizar.", "info");
       return;
     }
@@ -856,9 +900,16 @@ export class JudgeApp {
       this.setNotice("No se pudo sincronizar todo. Reintentá.", "error");
       return;
     }
+    // `retryRecoverableFailures` solo reactiva (PENDING): el `syncAllOnce`
+    // esperado envía o falla. Se cubre la variante defensiva en la que la
+    // operación reactivada no fue reportada, sin sugerir jamás "nada pendiente".
     this.setNotice(
-      res.synced > 0 ? "Sincronizado." : "Nada pendiente de sincronizar.",
-      res.synced > 0 ? "success" : "info",
+      res.synced > 0
+        ? "Sincronizado."
+        : recovered > 0
+          ? "La operación recuperable fue enviada correctamente."
+          : "Nada pendiente de sincronizar.",
+      res.synced > 0 || recovered > 0 ? "success" : "info",
     );
     const detail = this.state.detail;
     if (detail !== null) {

@@ -25,6 +25,18 @@ export interface SyncSnapshot {
   syncing: number;
   synced: number;
   failed: number;
+  /**
+   * Operaciones FAILED con `lastError.retryable === false` (bloqueadas):
+   * conflictos, 4xx no recuperables, planilla perdida localmente. NO se
+   * reintentan automáticamente ni por recuperación manual.
+   */
+  blocked: number;
+  /**
+   * Operaciones FAILED con `lastError.retryable === true` (errores
+   * recuperables agotados, p. ej. `MAX_ATTEMPTS`). NO se reintentan
+   * automáticamente, pero admiten recuperación manual explícita.
+   */
+  retryableFailed: number;
 }
 
 export interface SyncManagerOptions {
@@ -201,13 +213,53 @@ export class SyncManager {
     const ops = this.store.listOperations();
     const count = (state: OutboxOperation["state"]): number =>
       ops.filter((op) => op.state === state).length;
+    const failedOps = ops.filter((op) => op.state === "FAILED");
     return {
       online: this.connectivity.isOnline(),
       pending: count("PENDING"),
       syncing: count("SYNCING"),
       synced: count("SYNCED"),
       failed: count("FAILED"),
+      blocked: failedOps.filter((op) => op.lastError?.retryable === false)
+        .length,
+      retryableFailed: failedOps.filter((op) => op.lastError?.retryable === true)
+        .length,
     };
+  }
+
+  /**
+   * Recuperación MANUAL de errores recuperables agotados: vuelve a PENDING
+   * (intentos 0) únicamente las operaciones FAILED con
+   * `lastError.retryable === true`, sin alterar payload, revisión ni
+   * idempotencia. No reactiva operaciones bloqueadas (`retryable === false`,
+   * conflictos, `PLANILLA_LOST_LOCALLY`). Devuelve cuántas reactivó.
+   *
+   * NO drena: el llamador es responsable de ejecutar `syncAllOnce()` para
+   * reaprovechar las operaciones reactivadas (evita un doble drenado
+   * concurrente y le permite esperar el resultado de forma determinística).
+   */
+  async retryRecoverableFailures(): Promise<number> {
+    const nowIso = this.clock.nowIso();
+    const recoverable = this.store
+      .listOperations()
+      .filter(
+        (op) => op.state === "FAILED" && op.lastError?.retryable === true,
+      );
+    for (const op of recoverable) {
+      const updated = {
+        ...op,
+        state: "PENDING" as const,
+        attempts: 0,
+        updatedAt: nowIso,
+      };
+      // exactOptionalPropertyTypes: eliminar la key, no asignar undefined.
+      delete updated.nextAttemptAt;
+      this.store.saveOperation(updated);
+    }
+    if (recoverable.length > 0) {
+      this.emitStatus();
+    }
+    return recoverable.length;
   }
 
   start(): void {

@@ -17,6 +17,7 @@ import type {
   LocalPlanilla,
   LocalVote,
   OutboxOperation,
+  OutboxState,
 } from "../src/offline/types.js";
 
 // ---------------------------------------------------------------------------
@@ -682,6 +683,177 @@ describe("sincronización y reconciliación", () => {
       pending: 0,
       synced: 2,
     });
+  });
+});
+
+describe("estados de sincronización (F4)", () => {
+  it("blocked cuenta solo FAILED con retryable:false", async () => {
+    const harness = makeHarness();
+    harness.transport.http(401, { message: "unauthorized" });
+    const planilla = makePlanilla("p-1");
+    const vote = makeVote({ id: "v-1", planillaId: "p-1" });
+    await enqueueOffline(harness, planilla, [vote]);
+
+    harness.connectivity.setOnline(true);
+    await harness.manager.whenIdle();
+
+    const snapshot = harness.manager.getSnapshot();
+    expect(snapshot.failed).toBe(1);
+    expect(snapshot.blocked).toBe(1);
+    expect(snapshot.retryableFailed).toBe(0);
+  });
+
+  it("retryableFailed cuenta FAILED con retryable:true", async () => {
+    const harness = makeHarness({ maxAttempts: 1 });
+    harness.transport.network();
+    const planilla = makePlanilla("p-1");
+    const vote = makeVote({ id: "v-1", planillaId: "p-1" });
+    await enqueueOffline(harness, planilla, [vote]);
+
+    harness.connectivity.setOnline(true);
+    await harness.manager.whenIdle();
+
+    const snapshot = harness.manager.getSnapshot();
+    expect(snapshot.failed).toBe(1);
+    expect(snapshot.blocked).toBe(0);
+    expect(snapshot.retryableFailed).toBe(1);
+  });
+
+  it("retryRecoverableFailures reactiva solo retryable:true y no toca conflictos", async () => {
+    const harness = makeHarness({ maxAttempts: 1 });
+    harness.transport.network();
+    harness.transport.ok(
+      okResult("p-c", [], {
+        planillaAction: "CONFLICT",
+        reason: "REMOTE_CHANGED",
+      }),
+    );
+    await enqueueOffline(harness, makePlanilla("p-a"), [
+      makeVote({ id: "v-a", planillaId: "p-a" }),
+    ]);
+    await enqueueOffline(harness, makePlanilla("p-c"), [
+      makeVote({ id: "v-c", planillaId: "p-c" }),
+    ]);
+
+    harness.connectivity.setOnline(true);
+    await harness.manager.whenIdle();
+
+    const opA = harness.store.listOperations().find((o) => o.planillaId === "p-a")!;
+    const opC = harness.store.listOperations().find((o) => o.planillaId === "p-c")!;
+    expect(opA.state).toBe("FAILED");
+    expect(opA.lastError?.retryable).toBe(true);
+    expect(opC.state).toBe("FAILED");
+    expect(opC.lastError?.retryable).toBe(false);
+
+    // Sin conexión la recuperación solo reactiva (no drena).
+    harness.connectivity.setOnline(false);
+    harness.transport.okFromRequest();
+    const recovered = await harness.manager.retryRecoverableFailures();
+    expect(recovered).toBe(1);
+
+    let after = harness.store.listOperations().find((o) => o.planillaId === "p-a")!;
+    expect(after.state).toBe("PENDING");
+    expect(after.attempts).toBe(0);
+    after = harness.store.listOperations().find((o) => o.planillaId === "p-c")!;
+    expect(after.state).toBe("FAILED"); // el conflicto nunca se reactiva
+
+    harness.connectivity.setOnline(true);
+    await harness.manager.whenIdle();
+    const finalA = harness.store.listOperations().find((o) => o.planillaId === "p-a")!;
+    const finalC = harness.store.listOperations().find((o) => o.planillaId === "p-c")!;
+    expect(finalA.state).toBe("SYNCED");
+    expect(finalC.state).toBe("FAILED");
+  });
+
+  it("recuperación preserva identidad y no duplica la operación", async () => {
+    const harness = makeHarness({ maxAttempts: 1 });
+    harness.transport.network();
+    await enqueueOffline(harness, makePlanilla("p-x"), [
+      makeVote({ id: "v-x", planillaId: "p-x" }),
+    ]);
+    harness.connectivity.setOnline(true);
+    await harness.manager.whenIdle();
+
+    const before = harness.store
+      .listOperations()
+      .find((o) => o.planillaId === "p-x")!;
+    expect(before.state).toBe("FAILED");
+    expect(before.lastError?.retryable).toBe(true);
+
+    // Sin conexión la recuperación solo reactiva (no drena) → permite
+    // inspeccionar la operación recuperada sin interferencia del drenado.
+    harness.connectivity.setOnline(false);
+    const recovered = await harness.manager.retryRecoverableFailures();
+    expect(recovered).toBe(1);
+
+    const after = harness.store.loadOperation(before.id);
+    expect(after).not.toBeNull();
+    // Identidad preservada íntegramente.
+    expect(after!.id).toBe(before.id);
+    expect(after!.planillaId).toBe(before.planillaId);
+    expect(after!.revision).toBe(before.revision);
+    expect(after!.payload).toEqual(before.payload);
+    expect(after!.payload.votes[0]!.idempotencyKey).toBe(
+      before.payload.votes[0]!.idempotencyKey,
+    );
+    // Solo lo autorizado cambia.
+    expect(after!.state).toBe("PENDING");
+    expect(after!.attempts).toBe(0);
+    expect(after!.nextAttemptAt).toBeUndefined();
+    // No se crea una operación nueva: existe una sola con el mismo id.
+    expect(
+      harness.store.listOperations().filter((o) => o.id === before.id),
+    ).toHaveLength(1);
+    expect(harness.store.listOperations()).toHaveLength(1);
+  });
+
+  it("snapshot mixto: solo FAILED contribuye a blocked/retryableFailed", () => {
+    const harness = makeHarness();
+    const now = "2027-01-01T00:00:00.000Z";
+    const op = (
+      id: string,
+      state: OutboxState,
+      retryable?: boolean,
+    ): OutboxOperation => ({
+      id,
+      kind: "SYNC_PLANILLA",
+      resource: "PLANILLA",
+      planillaId: id,
+      payload: {
+        planilla: { id, nightId: "night-1", clientRef: `plan-${id}` },
+        votes: [],
+      },
+      state,
+      attempts: state === "FAILED" ? 3 : 1,
+      revision: 1,
+      createdAt: now,
+      updatedAt: now,
+      ...(state === "FAILED" && retryable !== undefined
+        ? {
+            lastError: {
+              code: `E_${id}`,
+              message: `error de ${id}`,
+              retryable,
+            },
+          }
+        : {}),
+    });
+
+    harness.store.saveOperation(op("a-pending", "PENDING"));
+    harness.store.saveOperation(op("b-syncing", "SYNCING"));
+    harness.store.saveOperation(op("c-synced", "SYNCED"));
+    harness.store.saveOperation(op("d-fail-retryable", "FAILED", true));
+    harness.store.saveOperation(op("e-fail-blocked", "FAILED", false));
+
+    const snapshot = harness.manager.getSnapshot();
+    expect(snapshot.blocked).toBe(1); // solo e (retryable:false)
+    expect(snapshot.retryableFailed).toBe(1); // solo d (retryable:true)
+    expect(snapshot.failed).toBe(2);
+    expect(snapshot.pending).toBe(1);
+    expect(snapshot.syncing).toBe(1);
+    expect(snapshot.synced).toBe(1);
+    // PENDING / SYNCING / SYNCED no alteran los contadores clasificados.
+    expect(snapshot.blocked + snapshot.retryableFailed).toBe(snapshot.failed);
   });
 });
 
